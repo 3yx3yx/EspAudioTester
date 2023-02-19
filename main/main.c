@@ -11,7 +11,9 @@
 #include "driver/gpio.h"
 #include "lvgl.h"
 #include "st7789.h"
-
+#include "ui.h"
+#include "ui_comp.h"
+#include "ui_helpers.h"
 
 #define TAG "main"
 #define LV_TICK_PERIOD_MS 1
@@ -33,21 +35,40 @@ void app_main(void)
 
     xTaskCreatePinnedToCore(guiTask, "gui", 4096*2, NULL, 0, NULL, 1);
     xGuiSemaphore = xSemaphoreCreateMutex();
+
+    uint8_t i=0;
+    lv_obj_t* screen;
+
+
     while(1)
     {
         gpio_set_level(2,1);
-        vTaskDelay(pdMS_TO_TICKS(500));
-        gpio_set_level(2,0);
-        const uint8_t col[8]= {0,1,5,1,0,5,12,14};
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        switch (i)
+        {
+            case 0: screen=ui_startScreen; break;
+            case 1: screen=ui_mixerMenuScreen; break;
+            case 2: screen=ui_recPlayScreen; break;
+            case 3: screen=ui_tracklistScreen; break;
+            case 4: screen=ui_acceptDeclineScreen; break;
+            case 5: screen=ui_optionsScreen; break;
+            case 6: screen=ui_cableTestScreen; break;
+            default: screen = ui_startScreen; break;
+        }
+        i++;
+        if (i>6) i=0;
+
         if (xSemaphoreTake(xGuiSemaphore, portMAX_DELAY) == pdTRUE) {
-            static uint8_t i=0;
-            lv_colorwheel_set_rgb(cw ,lv_palette_main(col[i]));
-            i++;
-            if (i==8) i=0;
+//       lv_obj_clear_flag(ui_startMenu, LV_OBJ_FLAG_HIDDEN);
+//       lv_obj_clear_flag(ui_modeRoller, LV_OBJ_FLAG_HIDDEN);
+
+            _ui_screen_change(screen,LV_SCR_LOAD_ANIM_NONE,0,0);
             xSemaphoreGive(xGuiSemaphore);
         }
+        gpio_set_level(2,0);
+        vTaskDelay(pdMS_TO_TICKS(1000));
 
-        vTaskDelay(pdMS_TO_TICKS(500));
     }
 
 }
@@ -105,12 +126,14 @@ static void guiTask(void *pvParameter) {
 
 static void create_demo_application(void)
 {
+    ui_init();
+
     //lv_example_list_1();
 
-    cw = lv_colorwheel_create(lv_scr_act(), true);
-    lv_obj_set_size(cw, 200, 200);
-    lv_obj_center(cw);
-    lv_colorwheel_set_rgb(cw ,lv_palette_main(LV_PALETTE_GREEN));
+//    cw = lv_colorwheel_create(lv_scr_act(), true);
+//    lv_obj_set_size(cw, 200, 200);
+//    lv_obj_center(cw);
+//    lv_colorwheel_set_rgb(cw ,lv_palette_main(LV_PALETTE_GREEN));
 
 //    /*Create a chart*/
 //    lv_obj_t * chart;
