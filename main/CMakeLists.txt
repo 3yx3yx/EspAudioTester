@@ -20,6 +20,11 @@ idf_component_register(SRCS "main.c"
         SRCS "../components/ui/ui_img_speaker_png.c"
         SRCS "../components/ui/ui_img_stop_png.c"
         SRCS "../components/ui/ui_img_xlr_png.c"
+
+        INCLUDE_DIRS "./encoder"
+        SRCS "./encoder/encoder.c"
+
+        INCLUDE_DIRS "./"
         )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE "-Wno-format")
