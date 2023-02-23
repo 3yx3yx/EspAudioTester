@@ -87,7 +87,7 @@
 /**********************
  *  STATIC PROTOTYPES
  **********************/
-static void IRAM_ATTR spi_ready(spi_transaction_t *trans);
+static void  spi_ready(spi_transaction_t *trans);
 
 static bool lvgl_spi_driver_init();
 
@@ -242,7 +242,7 @@ void disp_spi_release(void) {
  *   STATIC FUNCTIONS
  **********************/
 
-static void IRAM_ATTR spi_ready(spi_transaction_t *trans) {
+IRAM_ATTR  static void spi_ready(spi_transaction_t *trans) {
     disp_spi_send_flag_t flags = (disp_spi_send_flag_t) trans->user;
 
     if (flags & DISP_SPI_SIGNAL_FLUSH) {

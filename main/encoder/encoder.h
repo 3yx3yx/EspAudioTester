@@ -7,8 +7,8 @@
 
 #include "driver/pulse_cnt.h"
 
-
-void encoderTask (void *pvParameter);
-
+pcnt_unit_handle_t encoderInit (void);
+int encoderGetPulseCount (pcnt_unit_handle_t pcnt_unit);
+uint16_t encoderCalculatePosition(int pulseCount, int current, int min, int max);
 
 #endif //MAIN_ENCODER_H

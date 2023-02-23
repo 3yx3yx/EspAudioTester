@@ -5,27 +5,20 @@
 
 static void lv_tick_task(void *arg);
 static void guiTask(void *pvParameter);
-static void create_demo_application(void);
 static void print_info(void);
-void lv_example_list_1(void);
+static void changeScreen (lv_obj_t* screen);
 
 SemaphoreHandle_t xGuiSemaphore;
-lv_obj_t *cw;
+pcnt_unit_handle_t enc;
 
 void app_main(void) {
     print_info();
-    gpio_reset_pin(2);
-    gpio_set_direction(2, GPIO_MODE_OUTPUT);
+    enc = encoderInit();
     xGuiSemaphore = xSemaphoreCreateMutex();
     xTaskCreatePinnedToCore(guiTask, "gui", 4096 * 2, NULL, 2, NULL, 1);
-    xTaskCreate(encoderTask,"encoderTask", 4096, NULL, 1, NULL);
-    uint8_t i = 0;
-    lv_obj_t *screen;
 
 
     while (1) {
-        gpio_set_level(2, 1);
-        vTaskDelay(pdMS_TO_TICKS(1000));
 
 /*        switch (i) {
             case 0:
@@ -55,17 +48,28 @@ void app_main(void) {
         }
         i++;
         if (i > 6) i = 0;*/
+        vTaskDelay(pdMS_TO_TICKS(100));
 
-        if (xSemaphoreTake(xGuiSemaphore, portMAX_DELAY) == pdTRUE) {
-//       lv_obj_clear_flag(ui_startMenu, LV_OBJ_FLAG_HIDDEN);
-//       lv_obj_clear_flag(ui_modeRoller, LV_OBJ_FLAG_HIDDEN);
-//_ui_screen_change(ui_mixerMenuScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0);
 
-            xSemaphoreGive(xGuiSemaphore);
+        int pulseCnt = encoderGetPulseCount(enc);
+        if (pulseCnt)
+        {
+            printf ("pcnt %d \n", pulseCnt);
+            if (xSemaphoreTake(xGuiSemaphore, portMAX_DELAY) == pdTRUE) {
+                if (lv_disp_get_scr_act(NULL) == ui_startScreen) {
+                    uint16_t current = lv_roller_get_selected(ui_modeRoller);
+                    uint16_t max = lv_roller_get_option_cnt(ui_modeRoller);
+
+                    lv_roller_set_selected(ui_modeRoller,
+                                           encoderCalculatePosition(pulseCnt, current, 0, max),
+                                           LV_ANIM_OFF);
+
+                }
+                xSemaphoreGive(xGuiSemaphore);
+            }
         }
-        gpio_set_level(2, 0);
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+
 
     }
 
@@ -104,69 +108,23 @@ static void guiTask(void *pvParameter) {
     ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, LV_TICK_PERIOD_MS * 1000));
 
-    create_demo_application();
-    _ui_screen_change(ui_mixerMenuScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0);
+    ui_init();
+    //changeScreen(ui_mixerMenuScreen);
+    changeScreen(ui_startScreen);
     xSemaphoreGive(xGuiSemaphore);
-    for (;;) {
-        /* Delay 1 tick (assumes FreeRTOS tick is 10ms */
-        vTaskDelay(pdMS_TO_TICKS(10));
 
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(10));
         /* Try to take the semaphore, call lvgl related function on success */
         if (pdTRUE == xSemaphoreTake(xGuiSemaphore, portMAX_DELAY)) {
             lv_task_handler();
             xSemaphoreGive(xGuiSemaphore);
-
-
         }
     }
 }
 
-static void create_demo_application(void) {
-    ui_init();
-
-    //lv_example_list_1();
-
-//    cw = lv_colorwheel_create(lv_scr_act(), true);
-//    lv_obj_set_size(cw, 200, 200);
-//    lv_obj_center(cw);
-//    lv_colorwheel_set_rgb(cw ,lv_palette_main(LV_PALETTE_GREEN));
-
-//    /*Create a chart*/
-//    lv_obj_t * chart;
-//    chart = lv_chart_create(lv_scr_act());
-//    lv_obj_set_size(chart, 200, 150);
-//    lv_obj_center(chart);
-//    lv_chart_set_type(chart, LV_CHART_TYPE_LINE);   /*Show lines and points too*/
-//
-//    /*Add two data series*/
-//    lv_chart_series_t * ser1 = lv_chart_add_series(chart, lv_palette_main(LV_PALETTE_RED), LV_CHART_AXIS_PRIMARY_Y);
-//    lv_chart_series_t * ser2 = lv_chart_add_series(chart, lv_palette_main(LV_PALETTE_GREEN), LV_CHART_AXIS_SECONDARY_Y);
-//
-//    /*Set the next points on 'ser1'*/
-//    lv_chart_set_next_value(chart, ser1, 10);
-//    lv_chart_set_next_value(chart, ser1, 10);
-//    lv_chart_set_next_value(chart, ser1, 10);
-//    lv_chart_set_next_value(chart, ser1, 10);
-//    lv_chart_set_next_value(chart, ser1, 10);
-//    lv_chart_set_next_value(chart, ser1, 10);
-//    lv_chart_set_next_value(chart, ser1, 10);
-//    lv_chart_set_next_value(chart, ser1, 30);
-//    lv_chart_set_next_value(chart, ser1, 70);
-//    lv_chart_set_next_value(chart, ser1, 90);
-//
-//    /*Directly set points on 'ser2'*/
-//    ser2->y_points[0] = 90;
-//    ser2->y_points[1] = 70;
-//    ser2->y_points[2] = 65;
-//    ser2->y_points[3] = 65;
-//    ser2->y_points[4] = 65;
-//    ser2->y_points[5] = 65;
-//    ser2->y_points[6] = 65;
-//    ser2->y_points[7] = 65;
-//    ser2->y_points[8] = 65;
-//    ser2->y_points[9] = 65;
-//
-//    lv_chart_refresh(chart); /*Required after direct set*/
+static void changeScreen (lv_obj_t* screen){
+    lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
 }
 
 static void lv_tick_task(void *arg) {
@@ -204,50 +162,6 @@ void print_info(void) {
 //    esp_restart();
 }
 
-static lv_obj_t *list1;
 
-static void event_handler(lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    lv_obj_t *obj = lv_event_get_target(e);
-    if (code == LV_EVENT_CLICKED) {
-        LV_LOG_USER("Clicked: %s", lv_list_get_btn_text(list1, obj));
-    }
-}
 
-void lv_example_list_1(void) {
-    /*Create a list*/
-    list1 = lv_list_create(lv_scr_act());
-    lv_obj_set_size(list1, 180, 220);
-    lv_obj_center(list1);
 
-    /*Add buttons to the list*/
-    lv_obj_t *btn;
-
-    lv_list_add_text(list1, "File");
-    btn = lv_list_add_btn(list1, LV_SYMBOL_FILE, "New");
-    lv_obj_add_event_cb(btn, event_handler, LV_EVENT_CLICKED, NULL);
-    btn = lv_list_add_btn(list1, LV_SYMBOL_DIRECTORY, "Open");
-    lv_obj_add_event_cb(btn, event_handler, LV_EVENT_CLICKED, NULL);
-    btn = lv_list_add_btn(list1, LV_SYMBOL_SAVE, "Save");
-    lv_obj_add_event_cb(btn, event_handler, LV_EVENT_CLICKED, NULL);
-    btn = lv_list_add_btn(list1, LV_SYMBOL_CLOSE, "Delete");
-    lv_obj_add_event_cb(btn, event_handler, LV_EVENT_CLICKED, NULL);
-    btn = lv_list_add_btn(list1, LV_SYMBOL_EDIT, "Edit");
-    lv_obj_add_event_cb(btn, event_handler, LV_EVENT_CLICKED, NULL);
-
-    lv_list_add_text(list1, "Connectivity");
-    btn = lv_list_add_btn(list1, LV_SYMBOL_BLUETOOTH, "Bluetooth");
-    lv_obj_add_event_cb(btn, event_handler, LV_EVENT_CLICKED, NULL);
-    btn = lv_list_add_btn(list1, LV_SYMBOL_GPS, "Navigation");
-    lv_obj_add_event_cb(btn, event_handler, LV_EVENT_CLICKED, NULL);
-    btn = lv_list_add_btn(list1, LV_SYMBOL_USB, "USB");
-    lv_obj_add_event_cb(btn, event_handler, LV_EVENT_CLICKED, NULL);
-    btn = lv_list_add_btn(list1, LV_SYMBOL_BATTERY_FULL, "Battery");
-    lv_obj_add_event_cb(btn, event_handler, LV_EVENT_CLICKED, NULL);
-
-    lv_list_add_text(list1, "Exit");
-    btn = lv_list_add_btn(list1, LV_SYMBOL_OK, "Apply");
-    lv_obj_add_event_cb(btn, event_handler, LV_EVENT_CLICKED, NULL);
-    btn = lv_list_add_btn(list1, LV_SYMBOL_CLOSE, "Close");
-    lv_obj_add_event_cb(btn, event_handler, LV_EVENT_CLICKED, NULL);
-}
