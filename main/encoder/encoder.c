@@ -58,36 +58,3 @@ uint16_t encoderCalculatePosition(int pulseCount, int current, int min, int max)
     return pos;
 }
 
-void encoderTask (void* arg){
-    enc = encoderInit();
-//    encoderQueue = xQueueCreate(10,sizeof(int));
-//    assert(encoderQueue!=NULL);
-
-    while(1){
-        vTaskDelay(pdMS_TO_TICKS(100));
-        int pulseCnt = encoderGetPulseCount(enc);
-//        xQueueSend(encoderQueue,&pulseCnt, pdMS_TO_TICKS(1000));
-        uint32_t event = 0;
-        if (pulseCnt<0) {
-            event|= 0x80;
-        }
-        event |= ((uint32_t)abs(pulseCnt) & 0x7F);
-        xTaskNotifyAndQuery(guiTaskHandle,event,eSetBits,NULL);
-    }
-}
-/*void encoderTask (void *pvParameter) {
-    int position = 0;
-    while (1) {
-
-        ESP_ERROR_CHECK(pcnt_unit_get_count(pcnt_unit, &pulse_count));
-        if (pulse_count){
-            position += pulse_count;
-            if (position>100) { position = 100;}
-            if (position<0) { position=0;}
-
-            ESP_ERROR_CHECK(pcnt_unit_clear_count(pcnt_unit));
-            ESP_LOGI(TAG, "Position: %d", position);
-        }
-        vTaskDelay(300 / portTICK_PERIOD_MS);
-    }
-}*/

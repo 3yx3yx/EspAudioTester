@@ -5,34 +5,29 @@
 #include "encoder.h"
 #include "button.h"
 
+void (*currentScreenUpd) (int encoder_delta, button_t* button_event);
+
 void changeScreen (lv_obj_t* screen){
     lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
 }
 
+void ui_updateStartScreen (int encoder_delta, button_t* button_event){
 
-
-void ui_updateStartScreen (uint32_t event){
-
-    if (event & ENCODER_NOTIFY_MASK) {
-        int pulseCount = (int) (event & 0x7F);
-        if (event & 0x80) { pulseCount *= -1; }
-        uint16_t max = lv_roller_get_option_cnt(ui_modeRoller) - 1;
-        uint16_t current = lv_roller_get_selected(ui_modeRoller);
-
-        lv_roller_set_selected(ui_modeRoller,
-                               encoderCalculatePosition(pulseCount, current, 0, max),
+    if (encoder_delta) {
+        uint16_t max = lv_roller_get_option_cnt(ui_start_menu_roller) - 1;
+        uint16_t current = lv_roller_get_selected(ui_start_menu_roller);
+        lv_roller_set_selected(ui_start_menu_roller,
+                               encoderCalculatePosition(encoder_delta, current, 0, max),
                                LV_ANIM_OFF);
     }
 
-    if (event & BTN_NOTIFY_MASK) {
-        uint8_t btn = (event>>8) & 0b111;
-        printf("BTN %d\n", btn);
-        if (btn == 2) {
+    if (button_event != NULL) {
+        if (button_event->pin==BTN_LEFT_PIN) {
             if (lv_disp_get_scr_prev(NULL) != NULL)
                 changeScreen(lv_disp_get_scr_prev(NULL));
             return;
-        } else if (btn == 1) {
-            switch (lv_roller_get_selected(ui_modeRoller)) {
+        } else if (button_event->pin==BTN_ENC_PIN) {
+            switch (lv_roller_get_selected(ui_start_menu_roller)) {
                 case 0:
                     changeScreen(ui_mixerMenuScreen);
                     break;
@@ -41,7 +36,6 @@ void ui_updateStartScreen (uint32_t event){
                     break;
                 case 2:
                     changeScreen(ui_recPlayScreen);
-
                     break;
                 case 3:
                     changeScreen(ui_mixerMenuScreen);
@@ -60,4 +54,20 @@ void ui_updateStartScreen (uint32_t event){
         }
     }
 
+}
+
+void ui_set_battery_bar (int charge) {
+    if (charge <= 100) {
+        char charge_lable[5];
+        sprintf(charge_lable,"%d%%", charge);
+        lv_label_set_text(ui_battery_val, charge_lable);
+        lv_bar_set_value(ui_battery_bar, charge, LV_ANIM_OFF);
+    }
+    else { // if charger is plugged run animation
+        lv_label_set_text(ui_battery_val," ");
+        static uint8_t count = 0;
+        lv_bar_set_value(ui_battery_bar, count, LV_ANIM_OFF);
+        count+=20;
+        if (count>100) count = 0;
+    }
 }

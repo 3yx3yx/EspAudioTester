@@ -9,8 +9,9 @@
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_log.h"
 
-extern  TaskHandle_t guiTaskHandle;
-void guiTask(void *pvParameter);
+
+void set_pwm_backlight (uint8_t percent);
 
 #endif //ESP_AUDIOTEST_MAIN_H

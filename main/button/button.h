@@ -12,19 +12,20 @@
 
 #define BTN_ENC_PIN (33)
 #define BTN_LEFT_PIN (39)
-#define BTN_ENC_IDX (1)
-#define BTN_LEFT_IDX (2)
-#define BTN_NOTIFY_MASK (0xF00)
-void buttonTask (void* arg);
+#define BTN_LONG_THRESHOLD (1000)
+#define INPUT_ACK_DELAY (50)
+
+
 
 typedef struct buttonStruct {
     uint8_t pin;
     bool wasLong;
     bool wasPressed;
     uint8_t counter;
-    uint8_t idx;
 }button_t;
 
+button_t* get_button_event (void);
+void button_init (void);
 //extern QueueSetHandle_t buttonQueue;
 
 #endif //ESP_AUDIOTEST_BUTTON_H

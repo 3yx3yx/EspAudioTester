@@ -14,29 +14,31 @@ extern "C" {
 
 extern lv_obj_t * ui_startScreen;
 extern lv_obj_t * ui_startMenu;
-extern lv_obj_t * ui_modeRoller;
-extern lv_obj_t * ui_batteryBar;
-extern lv_obj_t * ui_Screen1_Label1;
+extern lv_obj_t * ui_start_menu_roller;
+extern lv_obj_t * ui_battery_bar;
+extern lv_obj_t * ui_battery_val;
 extern lv_obj_t * ui_mixerMenuScreen;
 extern lv_obj_t * ui_levelMenu;
-extern lv_obj_t * ui_vuSlider;
-extern lv_obj_t * ui_inputSlider;
-extern lv_obj_t * ui_dbLabel;
+extern lv_obj_t * ui_mixer_vu_bar_slider;
+extern lv_obj_t * ui_mixer_slider;
+extern lv_obj_t * ui_mixer_db_val;
 extern lv_obj_t * ui_ouputLevelArc;
-extern lv_obj_t * ui_outLevelLabel;
+extern lv_obj_t * ui_mixer_arc_value;
 extern lv_obj_t * ui_spkIcon;
 extern lv_obj_t * ui_hpIcon;
-extern lv_obj_t * ui_Screen1_Image3;
-extern lv_obj_t * ui_Screen1_Image4;
-extern lv_obj_t * ui_hpSpkSwitch;
-extern lv_obj_t * ui_hpSpkSwitch1;
+extern lv_obj_t * ui_mic_icon;
+extern lv_obj_t * ui_xlr_icon;
+extern lv_obj_t * ui_mic_line_switch;
+extern lv_obj_t * ui_hp_spk_switch;
+extern lv_obj_t * ui_mixer_arc_label;
 extern lv_obj_t * ui_recPlayScreen;
 extern lv_obj_t * ui_recPlayMenu;
 extern lv_obj_t * ui_chart;
-extern lv_obj_t * ui_elapsedTimeLabel;
+extern lv_obj_t * ui_elapsed_time_label;
 extern lv_obj_t * ui_timePosSlider;
-extern lv_obj_t * ui_playMenuBtnLeft;
-extern lv_obj_t * ui_playMenuBtnRight;
+extern lv_obj_t * ui_rec_play_left_button;
+extern lv_obj_t * ui_rec_play_right_button;
+extern lv_obj_t * ui_rec_play_track_len_label;
 extern lv_obj_t * ui_tracklistScreen;
 extern lv_obj_t * ui_tracklistMenu;
 extern lv_obj_t * ui_trackListRoller;
@@ -44,8 +46,8 @@ extern lv_obj_t * ui_acceptDeclineScreen;
 extern lv_obj_t * ui_choiceMenu;
 extern lv_obj_t * ui_buttonDecline;
 extern lv_obj_t * ui_declineLabel;
-extern lv_obj_t * ui_buttonDecline1;
-extern lv_obj_t * ui_declineLabel1;
+extern lv_obj_t * ui_buttonAccept;
+extern lv_obj_t * ui_acceptLabel;
 extern lv_obj_t * ui_saveLabel;
 extern lv_obj_t * ui_optionsScreen;
 extern lv_obj_t * ui_settingsMenu;
@@ -56,6 +58,8 @@ extern lv_obj_t * ui_beepEnableSwitch;
 extern lv_obj_t * ui_labelPhantom;
 extern lv_obj_t * ui_spkEnableLabel;
 extern lv_obj_t * ui_beepEnableLabel;
+extern lv_obj_t * ui_brightness_slider;
+extern lv_obj_t * ui_brightness_label;
 extern lv_obj_t * ui_cableTestScreen;
 extern lv_obj_t * ui_cableTesterMenu;
 extern lv_obj_t * ui_acceptIcon;
@@ -69,9 +73,6 @@ LV_IMG_DECLARE(ui_img_headphone_png);    // assets/headphone.png
 LV_IMG_DECLARE(ui_img_mic_png);    // assets/mic.png
 LV_IMG_DECLARE(ui_img_xlr_png);    // assets/xlr.png
 LV_IMG_DECLARE(ui_img_mixer_png);    // assets/mixer.png
-LV_IMG_DECLARE(ui_img_stop_png);    // assets/stop.png
-LV_IMG_DECLARE(ui_img_rec_png);    // assets/rec.png
-LV_IMG_DECLARE(ui_img_pause_png);    // assets/pause.png
 LV_IMG_DECLARE(ui_img_play_png);    // assets/play.png
 LV_IMG_DECLARE(ui_img_accept_png);    // assets/accept.png
 
