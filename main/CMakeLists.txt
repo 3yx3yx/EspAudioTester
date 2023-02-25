@@ -24,6 +24,12 @@ idf_component_register(SRCS "main.c"
         INCLUDE_DIRS "./encoder"
         SRCS "./encoder/encoder.c"
 
+        INCLUDE_DIRS "./button"
+        SRCS "./button/button.c"
+
+        INCLUDE_DIRS "./ui_controls"
+        SRCS "./ui_controls/ui_controls.c"
+
         INCLUDE_DIRS "./"
         )
 

@@ -1,82 +1,45 @@
 #include "main.h"
 
+#include "esp_chip_info.h"
+#include "esp_flash.h"
+#include "freertos/semphr.h"
+#include "esp_system.h"
+#include "esp_timer.h"
+#include "lvgl.h"
+#include "st7789.h"
+#include "encoder.h"
+#include "button.h"
+#include "ui_controls.h"
+
 #define TAG "main"
-#define LV_TICK_PERIOD_MS 1
+#define LV_TICK_PERIOD_MS (1)
 
 static void lv_tick_task(void *arg);
-static void guiTask(void *pvParameter);
-static void print_info(void);
-static void changeScreen (lv_obj_t* screen);
 
 SemaphoreHandle_t xGuiSemaphore;
-pcnt_unit_handle_t enc;
+TaskHandle_t guiTaskHandle;
 
 void app_main(void) {
-    print_info();
-    enc = encoderInit();
-    xGuiSemaphore = xSemaphoreCreateMutex();
-    xTaskCreatePinnedToCore(guiTask, "gui", 4096 * 2, NULL, 2, NULL, 1);
 
+    xGuiSemaphore = xSemaphoreCreateMutex();
+    xTaskCreatePinnedToCore(guiTask, "gui", 4096 * 2, NULL, 3, NULL, 1);
+    guiTaskHandle = xTaskGetHandle("gui");
+    xTaskCreatePinnedToCore(buttonTask, "button", 2048, NULL, 3, NULL, 1);
+    xTaskCreatePinnedToCore(encoderTask, "encoder", 2048, NULL, 3, NULL, 1);
 
     while (1) {
-
-/*        switch (i) {
-            case 0:
-                screen = ui_startScreen;
-                break;
-            case 1:
-                screen = ui_mixerMenuScreen;
-                break;
-            case 2:
-                screen = ui_recPlayScreen;
-                break;
-            case 3:
-                screen = ui_tracklistScreen;
-                break;
-            case 4:
-                screen = ui_acceptDeclineScreen;
-                break;
-            case 5:
-                screen = ui_optionsScreen;
-                break;
-            case 6:
-                screen = ui_cableTestScreen;
-                break;
-            default:
-                screen = ui_startScreen;
-                break;
+        vTaskDelay(pdMS_TO_TICKS(10));
+        /* Try to take the semaphore, call lvgl related function on success */
+        if (pdTRUE == xSemaphoreTake(xGuiSemaphore, portMAX_DELAY)) {
+            lv_task_handler();
+            xSemaphoreGive(xGuiSemaphore);
         }
-        i++;
-        if (i > 6) i = 0;*/
-        vTaskDelay(pdMS_TO_TICKS(100));
-
-
-        int pulseCnt = encoderGetPulseCount(enc);
-        if (pulseCnt)
-        {
-            printf ("pcnt %d \n", pulseCnt);
-            if (xSemaphoreTake(xGuiSemaphore, portMAX_DELAY) == pdTRUE) {
-                if (lv_disp_get_scr_act(NULL) == ui_startScreen) {
-                    uint16_t current = lv_roller_get_selected(ui_modeRoller);
-                    uint16_t max = lv_roller_get_option_cnt(ui_modeRoller);
-
-                    lv_roller_set_selected(ui_modeRoller,
-                                           encoderCalculatePosition(pulseCnt, current, 0, max),
-                                           LV_ANIM_OFF);
-
-                }
-                xSemaphoreGive(xGuiSemaphore);
-            }
-        }
-
-
-
     }
 
 }
 
 
-static void guiTask(void *pvParameter) {
+void guiTask(void *pvParameter) {
     (void) pvParameter; //unused
     xSemaphoreTake(xGuiSemaphore, portMAX_DELAY);
     lv_init();
@@ -109,32 +72,33 @@ static void guiTask(void *pvParameter) {
     ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, LV_TICK_PERIOD_MS * 1000));
 
     ui_init();
-    //changeScreen(ui_mixerMenuScreen);
+
     changeScreen(ui_startScreen);
     xSemaphoreGive(xGuiSemaphore);
-
+    uint32_t event = 0;
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(10));
+        event = 0;
+        xTaskNotifyWait(0,ULONG_MAX,&event,portMAX_DELAY);
         /* Try to take the semaphore, call lvgl related function on success */
         if (pdTRUE == xSemaphoreTake(xGuiSemaphore, portMAX_DELAY)) {
-            lv_task_handler();
+            if (lv_scr_act() == ui_startScreen) {
+                ui_updateStartScreen(event);
+            }
             xSemaphoreGive(xGuiSemaphore);
         }
     }
 }
 
-static void changeScreen (lv_obj_t* screen){
-    lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
-}
+
 
 static void lv_tick_task(void *arg) {
     (void) arg;
     lv_tick_inc(LV_TICK_PERIOD_MS);
 }
 
-void print_info(void) {
+/*void print_info(void) {
     printf("Hello world!\n");
-    /* Print chip information */
+    *//* Print chip information *//*
     esp_chip_info_t chip_info;
     uint32_t flash_size;
     esp_chip_info(&chip_info);
@@ -160,7 +124,7 @@ void print_info(void) {
 //    printf("Restarting now.\n");
 //    fflush(stdout);
 //    esp_restart();
-}
+}*/
 
 
 

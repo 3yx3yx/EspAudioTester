@@ -3,26 +3,17 @@
 //
 
 #include "encoder.h"
-#include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
-#include "freertos/task.h"
+#include "main.h"
 
 #define EC_GPIO_A 34
 #define EC_GPIO_B 35
-static const char *TAG = "ENC";
 
 #define PCNT_HIGH_LIMIT (100)
 #define PCNT_LOW_LIMIT  (-100)
 
-/*static bool pcntOnReach(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t *edata, void *user_ctx)
-{
-    BaseType_t high_task_wakeup;
-    QueueHandle_t queue = (QueueHandle_t)user_ctx;
-    // send event data to queue, from this interrupt callback
-    xQueueSendFromISR(queue, &(edata->watch_point_value), &high_task_wakeup);
-    return (high_task_wakeup == pdTRUE);
-}*/
+//QueueSetHandle_t encoderQueue;
+pcnt_unit_handle_t enc;
+
 
 pcnt_unit_handle_t encoderInit (void){
     pcnt_unit_config_t unit_config = {
@@ -46,15 +37,7 @@ pcnt_unit_handle_t encoderInit (void){
     ESP_ERROR_CHECK(pcnt_new_channel(pcnt_unit, &chan_a_config, &pcnt_chan_a));
     ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan_a, PCNT_CHANNEL_EDGE_ACTION_DECREASE, PCNT_CHANNEL_EDGE_ACTION_INCREASE));
     ESP_ERROR_CHECK(pcnt_channel_set_level_action(pcnt_chan_a, PCNT_CHANNEL_LEVEL_ACTION_HOLD, PCNT_CHANNEL_LEVEL_ACTION_INVERSE));
-    /*int watch_points[] = {PCNT_LOW_LIMIT,PCNT_HIGH_LIMIT};
-    for (size_t i = 0; i < sizeof(watch_points) / sizeof(watch_points[0]); i++) {
-        ESP_ERROR_CHECK(pcnt_unit_add_watch_point(pcnt_unit, watch_points[i]));
-    }
-    pcnt_event_callbacks_t cbs = {
-            .on_reach = pcntOnReach,
-    };
-    QueueHandle_t queue = xQueueCreate(10, sizeof(int));
-    ESP_ERROR_CHECK(pcnt_unit_register_event_callbacks(pcnt_unit, &cbs, queue));*/
+
     ESP_ERROR_CHECK(pcnt_unit_enable(pcnt_unit));
     ESP_ERROR_CHECK(pcnt_unit_clear_count(pcnt_unit));
     ESP_ERROR_CHECK(pcnt_unit_start(pcnt_unit));
@@ -69,10 +52,28 @@ int encoderGetPulseCount (pcnt_unit_handle_t pcnt_unit){
 }
 
 uint16_t encoderCalculatePosition(int pulseCount, int current, int min, int max){
-    uint16_t pos = current+pulseCount;
+    int pos = current+pulseCount;
     if (pos>max) pos=max;
     if (pos<min) pos=min;
     return pos;
+}
+
+void encoderTask (void* arg){
+    enc = encoderInit();
+//    encoderQueue = xQueueCreate(10,sizeof(int));
+//    assert(encoderQueue!=NULL);
+
+    while(1){
+        vTaskDelay(pdMS_TO_TICKS(100));
+        int pulseCnt = encoderGetPulseCount(enc);
+//        xQueueSend(encoderQueue,&pulseCnt, pdMS_TO_TICKS(1000));
+        uint32_t event = 0;
+        if (pulseCnt<0) {
+            event|= 0x80;
+        }
+        event |= ((uint32_t)abs(pulseCnt) & 0x7F);
+        xTaskNotifyAndQuery(guiTaskHandle,event,eSetBits,NULL);
+    }
 }
 /*void encoderTask (void *pvParameter) {
     int position = 0;

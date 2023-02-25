@@ -104,7 +104,7 @@ void ui_startScreen_screen_init(void)
     lv_obj_set_align(ui_batteryBar, LV_ALIGN_CENTER);
     lv_obj_add_state(ui_batteryBar, LV_STATE_PRESSED);       /// States
     lv_obj_set_style_radius(ui_batteryBar, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_blend_mode(ui_batteryBar, LV_BLEND_MODE_SUBTRACTIVE, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_blend_mode(ui_batteryBar, LV_BLEND_MODE_ADDITIVE, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_set_style_radius(ui_batteryBar, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(ui_batteryBar, lv_color_hex(0xD75B5D), LV_PART_INDICATOR | LV_STATE_DEFAULT);
