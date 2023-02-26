@@ -12,7 +12,7 @@
 
 #define  GUI_REFRESH_DELAY 200
 
-extern void (*currentScreenUpd) (int encoder_delta, button_t* button_event);
+extern void (*currentScreenUpd) (int, button_t*);
 
 void changeScreen (lv_obj_t* screen);
 void ui_updateStartScreen (int encoder_delta, button_t* button_event);

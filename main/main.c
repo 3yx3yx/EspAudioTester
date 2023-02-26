@@ -87,11 +87,11 @@ void app_main(void) {
 
             lv_task_handler();
             // update GUI
-            if ((xTaskGetTickCount() - last_gui_update) > pdMS_TO_TICKS(GUI_REFRESH_DELAY)) {
+           // if ((xTaskGetTickCount() - last_gui_update) > pdMS_TO_TICKS(GUI_REFRESH_DELAY)) {
                 currentScreenUpd(encoder_delta,button_event);
-                last_input_ack = xTaskGetTickCount();
+               // last_gui_update = xTaskGetTickCount();
                 encoder_delta=0; //clear this value after it was used
-            }
+            //}
             // battery measurement
             if (((xTaskGetTickCount() - last_adc_ack) > pdMS_TO_TICKS(2000))) {
                 uint8_t charge = get_battery_charge();
