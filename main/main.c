@@ -72,6 +72,7 @@ void app_main(void) {
     TickType_t last_gui_update=0;
     button_t* button_event = NULL;
     int encoder_delta=0;
+    uint8_t noInputEventCnt =0;
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -81,17 +82,19 @@ void app_main(void) {
             button_event = get_button_event();
             encoder_delta = encoderGetPulseCount(enc);
             last_input_ack = xTaskGetTickCount();
+            noInputEventCnt++; // upd Gui
         }
 
         if (pdTRUE == xSemaphoreTake(xGuiSemaphore, portMAX_DELAY)) {
-
             lv_task_handler();
             // update GUI
-           // if ((xTaskGetTickCount() - last_gui_update) > pdMS_TO_TICKS(GUI_REFRESH_DELAY)) {
-                currentScreenUpd(encoder_delta,button_event);
-               // last_gui_update = xTaskGetTickCount();
-                encoder_delta=0; //clear this value after it was used
-            //}
+            if (encoder_delta || button_event!= NULL || noInputEventCnt == 4) {
+                (*currentScreenUpd)(encoder_delta,button_event);
+                encoder_delta=0; //clear this values after
+                button_event = NULL;
+                noInputEventCnt=0;
+            }
+
             // battery measurement
             if (((xTaskGetTickCount() - last_adc_ack) > pdMS_TO_TICKS(2000))) {
                 uint8_t charge = get_battery_charge();

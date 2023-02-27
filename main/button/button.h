@@ -13,7 +13,7 @@
 #define BTN_ENC_PIN (33)
 #define BTN_LEFT_PIN (39)
 #define BTN_LONG_THRESHOLD (1000)
-#define INPUT_ACK_DELAY (50)
+#define INPUT_ACK_DELAY (60)
 
 
 

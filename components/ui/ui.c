@@ -355,7 +355,7 @@ void ui_mixerMenuScreen_screen_init(void)
     lv_obj_set_x(ui_mixer_arc_label, 48);
     lv_obj_set_y(ui_mixer_arc_label, 47);
     lv_obj_set_align(ui_mixer_arc_label, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_mixer_arc_label, "output");
+    lv_label_set_text(ui_mixer_arc_label, "monitor");
     lv_obj_set_style_text_color(ui_mixer_arc_label, lv_color_hex(0x8DA7A6), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_mixer_arc_label, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 

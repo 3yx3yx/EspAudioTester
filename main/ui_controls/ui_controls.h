@@ -10,7 +10,6 @@
 #include "ui_helpers.h"
 #include "button.h"
 
-#define  GUI_REFRESH_DELAY 200
 
 extern void (*currentScreenUpd) (int, button_t*);
 

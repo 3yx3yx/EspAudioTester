@@ -75,7 +75,9 @@ LV_IMG_DECLARE(ui_img_xlr_png);    // assets/xlr.png
 LV_IMG_DECLARE(ui_img_mixer_png);    // assets/mixer.png
 LV_IMG_DECLARE(ui_img_play_png);    // assets/play.png
 LV_IMG_DECLARE(ui_img_accept_png);    // assets/accept.png
-
+LV_IMG_DECLARE(ui_img_rec_png);
+LV_IMG_DECLARE(ui_img_pause_png);
+LV_IMG_DECLARE(ui_img_stop_png);
 
 
 
