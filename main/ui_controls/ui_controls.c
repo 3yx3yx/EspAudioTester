@@ -129,6 +129,7 @@ static void openCableTestMenu (void){
 }
 
 static bool escapeButtonEvent (button_t* button_event){
+    if (button_event == NULL) return false;
     if (button_event->pin == BTN_LEFT_PIN && button_event->wasLong) {
         changeScreen(ui_startScreen);
         currentScreenUpd = ui_updateStartScreen;
@@ -268,25 +269,16 @@ void ui_updateWaveGenScreen (int encoder_delta, button_t* button_event){
 }
 
 void ui_updateTrackListScreen (int encoder_delta, button_t* button_event){
-    if (button_event != NULL) {
-        if (button_event->pin == BTN_LEFT_PIN && button_event->wasLong) {
-            changeScreen(ui_startScreen);
-            currentScreenUpd = ui_updateStartScreen;
-            // mute codec
-            //
-        } else if (button_event->pin == BTN_ENC_PIN) {
-            //play selected track
-            //
-        }
+    if (button_event->pin == BTN_ENC_PIN && button_event != NULL) {
+        //play selected track
+        //
     }
 
     if (encoder_delta) {
-        uint16_t max = lv_roller_get_option_cnt(ui_trackListRoller) - 1;
-        uint16_t current = lv_roller_get_selected(ui_trackListRoller);
-        lv_roller_set_selected(ui_trackListRoller,
-                               encoderCalculatePosition(encoder_delta, current, 0, max),
-                               LV_ANIM_OFF);
+        incrementObj(ROLLER, ui_trackListRoller, encoder_delta);
     }
+
+    if (escapeButtonEvent(button_event)) { /*go to menu*/}
 }
 
 void ui_updateRecScreen (int encoder_delta, button_t* button_event){
