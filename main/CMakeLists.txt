@@ -30,6 +30,11 @@ idf_component_register(SRCS "main.c"
         INCLUDE_DIRS "./ui_controls"
         SRCS "./ui_controls/ui_controls.c"
 
+        INCLUDE_DIRS "./codec"
+        SRCS "./codec/wm8960.c"
+        SRCS "./codec/sd_card.c"
+        SRCS "./codec/wav.c"
+
         INCLUDE_DIRS "./"
         )
 

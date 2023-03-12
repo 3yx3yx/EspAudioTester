@@ -4,6 +4,8 @@
 #include "ui_controls.h"
 #include "encoder.h"
 #include "button.h"
+#include "sd_card.h"
+#include "wav.h"
 
 #define PRESS(obj) lv_obj_add_state(obj, LV_STATE_PRESSED);
 #define UNPRESS(obj) lv_obj_clear_state(obj, LV_STATE_PRESSED);
@@ -20,6 +22,8 @@
 void (*currentScreenUpd) (int, button_t*);
 void (*prevScreenUpd) (int, button_t*);
 
+#define TRACK_NUM_MAX 10
+static int file_selected_pos= 0;
 
 void changeScreen (lv_obj_t* screen){
     lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
@@ -93,27 +97,89 @@ static void openWaveGenMenu (void) {                                      //wave
     lv_obj_add_flag(ui_hpIcon, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(ui_mixer_arc_label, "freq");
 }
+
+lv_chart_series_t * chartSeries;
+
 static void openRecMenu (void){                                       //record
     changeScreen(ui_recPlayScreen);
     currentScreenUpd = ui_updateRecScreen;
     lv_img_set_src(ui_rec_play_right_button, &ui_img_rec_png );
-    lv_label_set_text(ui_rec_play_track_len_label, " ");
-    lv_label_set_text(ui_rec_play_track_len_label, "0.00");
+    lv_label_set_text(ui_elapsed_time_label, "");
+    lv_label_set_text(ui_rec_play_track_len_label, "");
     lv_slider_set_value(ui_timePosSlider,0, LV_ANIM_OFF);
-    //lv_chart_remove_series();
+    if (chartSeries!=NULL){
+        lv_chart_remove_series(ui_chart, chartSeries);
+    }
+    lv_chart_set_point_count(ui_chart, 100);
+    lv_chart_set_type(ui_chart, LV_CHART_TYPE_BAR);
+    chartSeries = lv_chart_add_series(ui_chart, lv_color_white(), LV_CHART_AXIS_PRIMARY_Y);
+
 }
 static void openPlayMenu (void){                                   //play
     changeScreen(ui_recPlayScreen);
     currentScreenUpd = ui_updatePlayScreen;
     lv_img_set_src(ui_rec_play_right_button, &ui_img_play_png );
-    lv_label_set_text(ui_rec_play_track_len_label, " ");
+    lv_label_set_text(ui_elapsed_time_label, " ");
     lv_label_set_text(ui_rec_play_track_len_label, "0.00");
     lv_slider_set_value(ui_timePosSlider,0, LV_ANIM_OFF);
-    //lv_chart_remove_series();
+
+    if (chartSeries!=NULL){
+        lv_chart_remove_series(ui_chart, chartSeries);
+    }
+    lv_chart_set_point_count(ui_chart, 100);
+    lv_chart_set_type(ui_chart, LV_CHART_TYPE_BAR);
+    chartSeries = lv_chart_add_series(ui_chart, lv_color_white(), LV_CHART_AXIS_PRIMARY_Y);
+
+
+    char fname [255] = "";
+    get_nth_file_name(file_selected_pos,fname);
+    uint32_t wav_size = wav_get_size(fname);
+
+    if (wav_size == 0) { // if cannot read file
+        lv_label_set_text(ui_elapsed_time_label, "ERROR");
+        lv_label_set_text(ui_rec_play_track_len_label, "ERROR");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        openTracklistMenu();
+        return;
+    }
+
+    FILE* f = fopen(fname,"r");
+    fseek(f, WAVE_HEADER_SIZE, SEEK_SET);
+    for (int i=0; i<100; i++) {
+      uint16_t peak = 0;
+      fread(&peak, sizeof(uint16_t),1, f);
+      peak /= (UINT16_MAX)/100;
+      printf ("PEAK %d\n", peak);
+      chartSeries->y_points[i] = peak;
+
+      fseek(f,(wav_size/100), SEEK_CUR);
+    }
+    lv_chart_refresh(ui_chart);
+    fclose(f);
+
+    uint32_t track_len_sec = wav_size /  BYTE_RATE;
+    char duration_label [10] = "";
+    sprintf(duration_label, "%d:%d", track_len_sec/60, track_len_sec % 60);
+    lv_label_set_text(ui_rec_play_track_len_label, duration_label);
+
 }
 static void openTracklistMenu (void){
-    changeScreen(ui_tracklistScreen);
-    currentScreenUpd = ui_updateTrackListScreen;
+
+    char list[350] = "";
+    sd_get_file_list(list, file_selected_pos, TRACK_NUM_MAX + file_selected_pos);
+    if (strlen(list)) {
+        lv_roller_set_options(ui_trackListRoller, list, LV_ROLLER_MODE_NORMAL);
+        lv_roller_set_selected(ui_trackListRoller, 0, LV_ANIM_OFF);
+    } else { // if no files found go to 0 position in list
+        file_selected_pos=0;
+        sd_get_file_list(list, file_selected_pos, TRACK_NUM_MAX + file_selected_pos);
+        lv_roller_set_selected(ui_trackListRoller, 0, LV_ANIM_OFF);
+    }
+
+    if (lv_disp_get_scr_act(NULL) != ui_tracklistScreen) {
+        changeScreen(ui_tracklistScreen);
+        currentScreenUpd = ui_updateTrackListScreen;
+    }
 }
 static void openAcceptDeclineMenu (void){
     changeScreen(ui_acceptDeclineScreen);
@@ -137,6 +203,7 @@ static bool escapeButtonEvent (button_t* button_event){
     }
     return false;
 }
+
 
 void ui_updateStartScreen (int encoder_delta, button_t* button_event){
 
@@ -227,7 +294,7 @@ void ui_updateMixerScreen(int encoder_delta, button_t *button_event) {
                 } else if (button_event->pin == BTN_LEFT_PIN) {
                     UNPRESS(objects[i_focused]);
                 }
-            } else if (button_event->pin == BTN_ENC_PIN && !waveGenMode) { // if wave gen mode where nObj==2 skip this
+            } else if (button_event->pin == BTN_ENC_PIN && !waveGenMode) {
                 if (lv_obj_get_state(objects[i_focused]) & LV_STATE_CHECKED) {
                     UNCHECK_OBJ(objects[i_focused]);
                     if (objects[i_focused] == ui_hp_spk_switch) {
@@ -269,12 +336,22 @@ void ui_updateWaveGenScreen (int encoder_delta, button_t* button_event){
 }
 
 void ui_updateTrackListScreen (int encoder_delta, button_t* button_event){
-    if (button_event->pin == BTN_ENC_PIN && button_event != NULL) {
+    if (button_event != NULL) {
+        if (button_event->pin == BTN_ENC_PIN )openPlayMenu();
         //play selected track
-        //
     }
 
     if (encoder_delta) {
+        file_selected_pos+=encoder_delta;
+        if (file_selected_pos<0) {
+            file_selected_pos=0;
+        }
+        lv_obj_t* roller = ui_trackListRoller;
+        if (((lv_roller_get_selected(roller) == lv_roller_get_option_cnt(roller)) && encoder_delta > 0)
+            || ((lv_roller_get_selected(roller) == 0) && encoder_delta < 0)) {
+            openTracklistMenu(); // reload files list if out of roller range
+            return;
+        }
         incrementObj(ROLLER, ui_trackListRoller, encoder_delta);
     }
 

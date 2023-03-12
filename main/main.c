@@ -13,6 +13,8 @@
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
 #include "driver/ledc.h"
+#include "wm8960.h"
+#include "sd_card.h"
 
 #define TAG "main"
 #define LV_TICK_PERIOD_MS (1)
@@ -29,6 +31,10 @@ static void pwm_init(void);
 SemaphoreHandle_t xGuiSemaphore;
 
 void app_main(void) {
+
+    mount_sdcard();
+    //record_wav(0);
+
     xGuiSemaphore = xSemaphoreCreateMutex();
     lv_init();
     disp_spi_add_device(TFT_SPI_HOST);
@@ -74,6 +80,11 @@ void app_main(void) {
     int encoder_delta=0;
     uint8_t noInputEventCnt =0;
 
+
+
+    //xTaskCreatePinnedToCore(i2s_example_write_task,"i2sTask", 4096, NULL, 3,NULL,1);
+
+
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10));
 
@@ -82,7 +93,7 @@ void app_main(void) {
             button_event = get_button_event();
             encoder_delta = encoderGetPulseCount(enc);
             last_input_ack = xTaskGetTickCount();
-            noInputEventCnt++; // upd Gui
+            noInputEventCnt++; // if no input event GUI will be updated anyway every 4 iterations
         }
 
         if (pdTRUE == xSemaphoreTake(xGuiSemaphore, portMAX_DELAY)) {
@@ -157,7 +168,7 @@ static uint32_t get_voltage_adc (void) {
         voltage = esp_adc_cal_raw_to_voltage(adc_raw[count], &adc1_chars);
     }
 
-    ESP_LOGI(TAG, "cali data: %d mV", voltage);
+    //ESP_LOGI(TAG, "cali data: %d mV", voltage);
     return voltage;
 }
 static int get_battery_charge(void){
@@ -168,7 +179,7 @@ static int get_battery_charge(void){
     else voltage = 0;
 
     float percent = (voltage*100.0f/(BATTERY_MAX_MV-BATTERY_MIN_MV));
-    printf ("PERCENT %f", percent);
+    //printf ("PERCENT %f", percent);
     if (percent > 100) return 0xFF;
     return (int)percent;
 }

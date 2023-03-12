@@ -379,6 +379,8 @@ void ui_recPlayScreen_screen_init(void)
     lv_obj_set_x(ui_chart, 1);
     lv_obj_set_y(ui_chart, -58);
     lv_obj_set_align(ui_chart, LV_ALIGN_CENTER);
+    lv_chart_set_point_count(ui_chart, 100);
+    lv_chart_set_type(ui_chart, LV_CHART_TYPE_BAR);
 
     ui_elapsed_time_label = lv_label_create(ui_recPlayMenu);
     lv_obj_set_width(ui_elapsed_time_label, LV_SIZE_CONTENT);   /// 1
