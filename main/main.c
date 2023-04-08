@@ -29,12 +29,13 @@ static int get_battery_charge(void);
 static void pwm_init(void);
 
 SemaphoreHandle_t xGuiSemaphore;
+TaskHandle_t wav_task_handle = NULL;
+TaskHandle_t i2s_task_handle = NULL;
 
 
 void app_main(void) {
 
     mount_sdcard();
-    //record_wav(0);
 
     xGuiSemaphore = xSemaphoreCreateMutex();
     lv_init();
@@ -70,8 +71,8 @@ void app_main(void) {
     button_init();
     pcnt_unit_handle_t enc = encoderInit();
     adc_init();
-    //pwm_init();
-    //set_pwm_backlight(50);
+    pwm_init();
+    set_pwm_backlight(50);
 
     UBaseType_t stackWMark =0;
     TickType_t last_input_ack=0;
@@ -83,9 +84,8 @@ void app_main(void) {
 
 
 
-    xTaskCreate(i2s_task,"i2sTask", 4096, NULL, 0,NULL);
-    xTaskCreate(wav_task,"wavTask", 4096, NULL, 0,NULL);
-
+    xTaskCreatePinnedToCore(i2s_task,"i2sTask", 4096, NULL, 1,&i2s_task_handle,0);
+    xTaskCreatePinnedToCore(wav_task,"wavTask", 4096, NULL, 1,&wav_task_handle,1);
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10));

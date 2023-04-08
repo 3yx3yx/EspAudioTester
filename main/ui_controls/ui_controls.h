@@ -9,7 +9,7 @@
 #include "ui_comp.h"
 #include "ui_helpers.h"
 #include "button.h"
-
+#include "main.h"
 
 extern void (*currentScreenUpd) (int, button_t*);
 

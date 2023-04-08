@@ -13,17 +13,9 @@
 #include "driver/i2s.h"
 #include <stdint.h>
 #include "wav.h"
+#include "main.h"
 
 #define WM8960_ADDRESS 0x1A //AUDIO CODEC ADDRESS
-
-enum {
-    NOTIFY_SENT_CALLBACK,
-    NOTIFY_RECV_CALLBACK,
-    NOTIFY_START,
-    NOTIFY_PAUSE,
-    NOTIFY_STOP
-};
-
 
 #define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
 #define BYTE_TO_BINARY(byte)  \
@@ -41,9 +33,8 @@ void i2c_init(void);
 esp_err_t wm8960_writeReg(uint8_t reg, uint16_t dat);
 void wm8960Init();
 void i2s_task(void *args);
-void wav_task(void * args);
+void wav_task(void *args);
 
-///////////////////////////////////
 enum {
     R0_LEFT_INPUT_VOLUME_ADR,
     R1_RIGHT_INPUT_VOLUME_ADR,

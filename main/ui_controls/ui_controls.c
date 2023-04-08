@@ -439,6 +439,8 @@ void ui_updateRecScreen (int encoder_delta, button_t* button_event){
 
 }
 
+extern TaskHandle_t wav_task_handle;
+
 void ui_updatePlayScreen (int encoder_delta, button_t* button_event){
 
     static bool paused = 0;
@@ -453,11 +455,13 @@ void ui_updatePlayScreen (int encoder_delta, button_t* button_event){
                 char fname [255] = "";
                 get_nth_file_name(file_selected_pos,fname);
                 wav_open_file(fname);
+                xTaskNotify(wav_task_handle,PLAYER_PLAY,eSetBits);
             }else {
                 paused = false;
                 lv_img_set_src(ui_rec_play_right_button, &ui_img_play_png);
                 // pause
                 //
+                xTaskNotify(wav_task_handle,PLAYER_STOP,eSetBits);
             }
         }
 
