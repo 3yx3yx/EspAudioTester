@@ -9,19 +9,21 @@
 #include "driver/i2s_std.h"
 #include "driver/i2s_common.h"
 #include "driver/i2s_types.h"
+#include "driver/i2s_types_legacy.h"
+#include "driver/i2s.h"
 #include <stdint.h>
+#include "wav.h"
 
 #define WM8960_ADDRESS 0x1A //AUDIO CODEC ADDRESS
 
-#define SAMPLE_RATE     (44100)
-#define WAVE_FREQ_HZ    (100)
-#define PI              (3.14159265)
-#define SAMPLE_PER_CYCLE (SAMPLE_RATE/WAVE_FREQ_HZ)
-#define EXAMPLE_BUFF_SIZE (SAMPLE_PER_CYCLE*2)
+enum {
+    NOTIFY_SENT_CALLBACK,
+    NOTIFY_RECV_CALLBACK,
+    NOTIFY_START,
+    NOTIFY_PAUSE,
+    NOTIFY_STOP
+};
 
-#define NUM_CHANNELS 2
-#define BIT_PER_SAMPLE 16
-#define BYTE_RATE (SAMPLE_RATE*NUM_CHANNELS*BIT_PER_SAMPLE/8)
 
 #define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
 #define BYTE_TO_BINARY(byte)  \
@@ -38,7 +40,8 @@ void i2s_init(void);
 void i2c_init(void);
 esp_err_t wm8960_writeReg(uint8_t reg, uint16_t dat);
 void wm8960Init();
-void i2s_example_write_task(void *args);
+void i2s_task(void *args);
+void wav_task(void * args);
 
 ///////////////////////////////////
 enum {

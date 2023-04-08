@@ -15,14 +15,37 @@
 
 #define TAG "Wav:"
 
+static uint32_t cur_file_size = 0;
+static FILE * cur_file = NULL;
 
+uint32_t wav_open_file (char* filename) {
+    if (cur_file != NULL) {
+        fclose(cur_file);
+    }
+    cur_file_size = wav_get_size(filename);
+    if (cur_file_size) {
+        cur_file = fopen(filename, "rw");
+    }
+    fseek(cur_file, WAVE_HEADER_SIZE, SEEK_SET);
+    return cur_file_size;
+}
+
+
+
+uint32_t wav_read_n_bytes (void* buf, uint32_t n) {
+    if (cur_file == NULL) return 0;
+    uint32_t ret = fread(buf,1,n,cur_file);
+    //fseek(cur_file,n,SEEK_CUR);
+    return ret;
+}
 
 
 uint32_t wav_get_size (char* filename) {
     FILE* f;
 
     f = fopen(filename, "r");
-
+    printf(filename);
+    printf(" \n");
     if (f == NULL) {
         ESP_LOGI(TAG, "FAILED to open!");
         return 0;

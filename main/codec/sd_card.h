@@ -16,5 +16,6 @@ void record_wav(uint32_t rec_time);
 void sd_get_file_list (char* list, uint16_t start_n, uint16_t end_n) ;
 
 void get_nth_file_name (uint16_t n, char* name);
+uint32_t get_files_count_at_mp (void);
 
 #endif //ESP_AUDIOTEST_SD_CARD_H

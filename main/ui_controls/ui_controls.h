@@ -23,6 +23,7 @@ void ui_updateTrackListScreen (int encoder_delta, button_t* button_event);
 void ui_updateAcceptDeclineScreen (int encoder_delta, button_t* button_event);
 void ui_updateOptionsScreen (int encoder_delta, button_t* button_event);
 void ui_updateCableTestScreen (int encoder_delta, button_t* button_event);
+void ui_updatePlayerMixer (int encoder_delta, button_t* button_event);
 
 void ui_set_battery_bar (int charge);
 

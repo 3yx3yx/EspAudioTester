@@ -30,6 +30,7 @@ static void pwm_init(void);
 
 SemaphoreHandle_t xGuiSemaphore;
 
+
 void app_main(void) {
 
     mount_sdcard();
@@ -69,8 +70,8 @@ void app_main(void) {
     button_init();
     pcnt_unit_handle_t enc = encoderInit();
     adc_init();
-    pwm_init();
-    set_pwm_backlight(50);
+    //pwm_init();
+    //set_pwm_backlight(50);
 
     UBaseType_t stackWMark =0;
     TickType_t last_input_ack=0;
@@ -82,7 +83,8 @@ void app_main(void) {
 
 
 
-    //xTaskCreatePinnedToCore(i2s_example_write_task,"i2sTask", 4096, NULL, 3,NULL,1);
+    xTaskCreate(i2s_task,"i2sTask", 4096, NULL, 0,NULL);
+    xTaskCreate(wav_task,"wavTask", 4096, NULL, 0,NULL);
 
 
     while (1) {

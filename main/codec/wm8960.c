@@ -4,11 +4,18 @@
 
 #include "wm8960.h"
 #include "math.h"
+#include "freertos/queue.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include "esp_system.h"
+#include "esp_log.h"
+#include "soc/io_mux_reg.h"
 
 #define SAMPLE_RATE     (44100)
-#define WAVE_FREQ_HZ    (100)
+#define WAVE_FREQ_HZ    (1000)
 #define PI              (3.14159265)
 #define I2S_BCK_IO      (19)
+
 #define I2S_WS_IO       (16)
 #define I2S_DO_IO       (17)
 #define I2S_DI_IO       (5)
@@ -17,53 +24,83 @@
 #define I2C_SCL (22)
 
 #define SAMPLE_PER_CYCLE (SAMPLE_RATE/WAVE_FREQ_HZ)
-#define EXAMPLE_BUFF_SIZE (SAMPLE_PER_CYCLE*2)
+#define N_FRAMES (512)
+#define N_DESC (4)
 
-static uint16_t samples[EXAMPLE_BUFF_SIZE] = {};
+static uint16_t samples[N_DESC][N_FRAMES] = {};
+//static uint16_t samples[SAMPLE_PER_CYCLE*2] = {};
+
+uint8_t samples_idx_r = 0;
+uint8_t samples_idx_w = 0;
+
 static i2s_chan_handle_t tx_handle;        // I2S tx channel handler
 static i2s_chan_handle_t rx_handle;
 
-//static uint16_t WM8960_REG_VAL[56] = {};
+static TaskHandle_t i2s_task_handle = NULL;
+
+QueueHandle_t audioQueue = NULL;
+
+size_t bytes_written_now = 0;
+size_t n_bytes_from_file = 0;
+//uint16_t *samples_p_write = samples;
+//uint16_t *samples_p_read = samples;
+bool needRead = 1;
 
 void i2c_init(void) {
     i2c_config_t conf;
     conf.mode = I2C_MODE_MASTER;
     conf.sda_io_num = I2C_SDA;
-    conf.sda_pullup_en = GPIO_PULLUP_DISABLE;
+    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
     conf.scl_io_num = I2C_SCL;
-    conf.scl_pullup_en = GPIO_PULLUP_DISABLE;
+    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
     conf.master.clk_speed = 400000;
     conf.clk_flags = 0;
     ESP_ERROR_CHECK(i2c_param_config(0, &conf));
     ESP_ERROR_CHECK(i2c_driver_install(0, conf.mode, 0, 0, 0));
 }
 
-void i2s_init(void) {
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle, &rx_handle));
+/*
+static IRAM_ATTR  bool i2s_on_sent_callback(i2s_chan_handle_t handle, i2s_event_data_t *event, void *user_ctx)
+{
 
-    i2s_std_config_t std_cfg = {
-            .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE),
-            .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
-            .gpio_cfg = {
-                    .mclk = I2S_GPIO_UNUSED,
-                    .bclk = I2S_BCK_IO,
-                    .ws   = I2S_WS_IO,
-                    .dout = I2S_DO_IO,
-                    .din  = I2S_DI_IO,
-                    .invert_flags = {
-                            .mclk_inv = false,
-                            .bclk_inv = false,
-                            .ws_inv   = false,
-                    },
-            },
+    if (n_bytes_from_file){
+        i2s_channel_write(tx_handle, samples, n_bytes_from_file, &bytes_written_now, 1);
+        n_bytes_from_file = 0;
+    }
+    return false;
+}
+*/
+
+void i2s_init(void) {
+
+
+
+    i2s_config_t i2s_config = {
+            .mode = I2S_MODE_MASTER | I2S_MODE_TX  | I2S_MODE_RX,
+            .sample_rate = 44100,
+            .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+            .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+            .communication_format = I2S_COMM_FORMAT_STAND_MSB,
+            .tx_desc_auto_clear = true,
+            .dma_buf_count = N_DESC,
+            .dma_buf_len = N_FRAMES,
+            .use_apll = 0,
+            .intr_alloc_flags = 0 // Interrupt level 1, default 0
     };
 
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &std_cfg));
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle, &std_cfg));
+    static const i2s_pin_config_t pin_config = {
 
-    i2s_channel_enable(tx_handle);
-    i2s_channel_enable(rx_handle);
+            .bck_io_num = I2S_BCK_IO,
+            .ws_io_num = I2S_WS_IO,
+            .data_out_num = I2S_DO_IO,
+            .data_in_num = I2S_DI_IO
+    };
+
+    i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);   //install and start i2s driver
+    i2s_set_pin(I2S_NUM_0, &pin_config);
+
+    REG_WRITE(PIN_CTRL, 0xFF0);
+    PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO0_U, FUNC_GPIO0_CLK_OUT1);
 }
 
 
@@ -73,18 +110,83 @@ esp_err_t wm8960_writeReg(uint8_t reg, uint16_t dat) {
     I2C_Data[1] = (uint8_t)(dat&0x00FF);                  //RegValue
 
     esp_err_t ret =
-            i2c_master_write_to_device(I2C_NUM_0, WM8960_ADDRESS, I2C_Data, 2, pdMS_TO_TICKS(1000));
+            i2c_master_write_to_device(I2C_NUM_0, WM8960_ADDRESS, I2C_Data, 2, pdMS_TO_TICKS(100));
 
-    vTaskDelay(pdMS_TO_TICKS(10));
-    //if (ret == ESP_OK) { WM8960_REG_VAL[reg] = dat; }
-    printf("i2c ret=%d data0="BYTE_TO_BINARY_PATTERN" data 1="BYTE_TO_BINARY_PATTERN"\n", ret, BYTE_TO_BINARY(I2C_Data[0]), BYTE_TO_BINARY(I2C_Data[1]));
+    vTaskDelay(pdMS_TO_TICKS(5));
+
+    printf("i2c ret=%d reg = %d data0="BYTE_TO_BINARY_PATTERN" data 1="BYTE_TO_BINARY_PATTERN"\n",reg, ret, BYTE_TO_BINARY(I2C_Data[0]), BYTE_TO_BINARY(I2C_Data[1]));
     return ret;
 }
+
+void i2s_task(void *args) {
+
+    i2c_init();
+    wm8960Init();
+    i2s_init();
+
+//    for (int i=0; i<SAMPLE_PER_CYCLE*2; i+=2){
+//         samples[i] = sin(2.00*PI*(double)i/((double)SAMPLE_PER_CYCLE*2.00))*10000.0f;
+////        samples[i] = (uint16_t)(((float)i/(SAMPLE_PER_CYCLE*2.00f))*10000.0f);
+//        samples[i+1] = samples[i];
+//    }
+
+    while (1) {
+
+            esp_err_t  ret = ESP_OK;
+            ret=i2s_write(I2S_NUM_0, &samples[samples_idx_w][0], N_FRAMES * sizeof(uint16_t), &bytes_written_now, portMAX_DELAY);
+            printf("bytes written i2s %d\n", bytes_written_now);
+            if (ret!=ESP_OK) {
+                printf("i2s write failed \n");
+            }
+            ++samples_idx_w;
+            if (samples_idx_w == N_DESC) samples_idx_w=0;
+
+            needRead=1;
+
+        portYIELD();
+    }
+}
+
+
+void wav_task(void *args){
+
+
+    bool first = 1;
+
+    while (1){
+
+        if (needRead) {
+            if (first) {
+                samples_idx_w=1;
+                samples_idx_r=0;
+                n_bytes_from_file = wav_read_n_bytes(samples, (N_FRAMES*N_DESC) * sizeof(uint16_t));
+
+                if (n_bytes_from_file)
+                {
+                    first=0;
+
+                }
+
+            }
+            else{
+                n_bytes_from_file = wav_read_n_bytes(&samples[samples_idx_r][0], (N_FRAMES) * sizeof(uint16_t));
+                ++samples_idx_r;
+                if (samples_idx_r == N_DESC) samples_idx_r = 0;
+                needRead = 0;
+            }
+
+        }
+
+        portYIELD();
+
+    }
+}
+
 
 void wm8960Init() {
     uint16_t reg;
 
-   wm8960_writeReg(0x0f, 0x0000); // reset
+    //wm8960_writeReg(0x0f, 0x0000); // reset
     // power management
     R25_PWR_MGMT_1_t pwrMgmt1 = {
             .ADCL=1,
@@ -93,7 +195,7 @@ void wm8960Init() {
             .AINR=1, //PGA
             .DIGENB=0, // 0 = master clock enabled
             .MICB=1,
-            .VMIDSEL = 0b01, // 01 = 50kOhm, 10 = 250k, 11 = 5k divider
+            .VMIDSEL = 0b11, // 01 = 50kOhm, 10 = 250k, 11 = 5k divider
             .VREF=1 // necessary for other functions - page 64
     };
     reg = *(uint16_t *) &pwrMgmt1;
@@ -101,9 +203,9 @@ void wm8960Init() {
 
     R26_PWR_MGMT_2_t pwrMgmt2 = {
             .PLL_EN = 1, // page 66
-            .OUT3 = 1,
-            .SPKR =1,
-            .SPKL=1,
+            .OUT3 = 0,
+            .SPKR =0,
+            .SPKL=0,
             .ROUT1=1,
             .LOUT1=1,
             .DACL=1,
@@ -122,7 +224,6 @@ void wm8960Init() {
     ESP_ERROR_CHECK(wm8960_writeReg(R47_PWR_MGMT_3, reg));
     // end pwr management
     // PLL config
-
     R52_PLL_N_t r52PllN = {
             /*
              * SYSCLK Output to GPIO Clock Division ratio
@@ -139,19 +240,19 @@ void wm8960Init() {
             0 = Integer mode
             1 = Fractional mode
              */
-            .SDM = 1,
+            .SDM = 0,
             /*
              * Divide MCLK by 2 before input to PLL
             0 = Divide by 1
             1 = Divide by 2
              */
-            .PLLRESCALE = 1, /// for mclk 24mhz
+            .PLLRESCALE = 0, /// for mclk 24mhz
             /*
              * Integer (N) part of PLL input/output frequency
             ratio. Use values greater than 5 and less than
             13
              */
-            .PLLN = 0x7 // 0x7 for 44.1k
+            .PLLN = 0x8 // 0x7 for 44.1k
     };
     reg = *(uint16_t *) &r52PllN;
     ESP_ERROR_CHECK(wm8960_writeReg(R52_PLL_1_ADDR, reg));
@@ -213,19 +314,19 @@ void wm8960Init() {
                 10 = Divide SYSCLK by 2
                 11 = Reserved
              */
-            .SYSCLKDIV = 0b1, // 0b10 for 48/44.1khz
+            .SYSCLKDIV = 0b00, // 0b10 for 48/44.1khz
             /*
              *  SYSCLK Selection
                 0 = SYSCLK derived from MCLK
                 1 = SYSCLK derived from PLL output
              */
-            .CLKSEL = 1
+            .CLKSEL = 0
     };
     reg = *(uint16_t *) &clocking1;
     ESP_ERROR_CHECK(wm8960_writeReg(R4_CLOCKING_1_ADR, reg));
 
     R8_CLOCKING_2_t clocking2 = {
-            .BCLKDIV = 0b111, // bclk freq (master mode)
+            .BCLKDIV = 0b100, // bclk freq (master mode)
             .DCLKDIV = 0b111 // 0b111 = sysclk/16 0b110 = sysclk/12 101 = /8 CLASS D CLK
     };
     reg = *(uint16_t *) &clocking2;
@@ -239,7 +340,7 @@ void wm8960Init() {
             .LINVOL= 0b100111 // default 01011 = 0db 111111=+30db
     };
     reg = *(uint16_t *) &leftInputVolume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R0_LEFT_INPUT_VOLUME_ADR, reg));
+    //   ESP_ERROR_CHECK(wm8960_writeReg(R0_LEFT_INPUT_VOLUME_ADR, reg));
 
     R1_RIGHT_INPUT_VOLUME_t rightInputVolume = {
             .IPUV = 1, // 1 will update gain
@@ -248,7 +349,7 @@ void wm8960Init() {
             .RINVOL=0b100111 // default 01011 = 0db 111111=+30db
     };
     reg = *(uint16_t *) &rightInputVolume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R1_RIGHT_INPUT_VOLUME_ADR, reg));
+    //   ESP_ERROR_CHECK(wm8960_writeReg(R1_RIGHT_INPUT_VOLUME_ADR, reg));
 
     R32_ADCL_SIGNAL_PATH_t adclSignalPath = {
             .LMIC2B = 0, //connect amp out to mixer
@@ -259,7 +360,7 @@ void wm8960Init() {
             //if lmp2 == lmp3 == 0, amp + input is connected to vmid
     };
     reg = *(uint16_t *) &adclSignalPath;
-    ESP_ERROR_CHECK(wm8960_writeReg(R32_ADCL_SIGNAL_PATH, reg));
+    //  ESP_ERROR_CHECK(wm8960_writeReg(R32_ADCL_SIGNAL_PATH, reg));
 
     R33_ADCR_SIGNAL_PATH_t adcrSignalPath = {
             .RMIC2B =0,
@@ -269,12 +370,12 @@ void wm8960Init() {
             .RMP3=0
     };
     reg = *(uint16_t *) &adcrSignalPath;
-    ESP_ERROR_CHECK(wm8960_writeReg(R33_ADCR_SIGNAL_PATH, reg));
+    //  ESP_ERROR_CHECK(wm8960_writeReg(R33_ADCR_SIGNAL_PATH, reg));
 
     R2_LOUT1_VOLUME_t lout1Volume = {
             .OUT1VU = 1, // write 1 to update headphone vol
             .LO1ZC = 0, // update on zero cross
-            .LOUT1VOL = 0b1111111 //127 max=+6db, 0110000=-73db, 0 = mute, 1db steps
+            .LOUT1VOL = 0b1111000 //127 max=+6db, 0110000=-73db, 0 = mute, 1db steps
     };
     reg = *(uint16_t *) &lout1Volume;
     ESP_ERROR_CHECK(wm8960_writeReg(R2_LOUT1_VOLUME_ADR, reg));
@@ -282,7 +383,7 @@ void wm8960Init() {
     R3_ROUT1_VOLUME_t rout1Volume = {
             .OUT1VU = 1,
             .RO1ZC =0,
-            .ROUT1VOL = 0b1111111
+            .ROUT1VOL = 0b1111000
     };
     reg = *(uint16_t *) &rout1Volume;
     ESP_ERROR_CHECK(wm8960_writeReg(R3_ROUT1_VOLUME_ADR, reg));
@@ -301,17 +402,17 @@ void wm8960Init() {
 
     R6_ADC_DAC_CONTROL_CTR2_t adcDacControlCtr2 = { //page 70
             .DACPOL = 0b00, // non-inverted
-            .DACSMM = 1, // soft mute 1 = volume will change gradually
-            .DACMR = 1, // 1 = slow volume changing ramp 171ms max
-            .DACSLOPE = 1 // 0=normal, 1 = sloping stopband
+            .DACSMM = 0, // soft mute 1 = volume will change gradually
+            .DACMR = 0, // 1 = slow volume changing ramp 171ms max
+            .DACSLOPE = 0 // 0=normal, 1 = sloping stopband
     };
     reg = *(uint16_t *) &adcDacControlCtr2;
     ESP_ERROR_CHECK(wm8960_writeReg(R6_ADC_DAC_CONTROL_CTR2_ADR, reg));
 
     R7_AUDIO_INTERFACE_t r7AudioInterface = {
-            .ALRSWAP = 1, // 0= normal, 1= swap left right data
+            .ALRSWAP = 0, // 0= normal, 1= swap left right data
             .BCLKINV = 0, // BCLK non-inverted 0
-            .MS = 1, // 0= slave mode
+            .MS = 0, // 0= slave mode
             .DLRSWAP = 0, // dac l/r swap
             .LRP = 0, // normal lrclk polarity 0
             /*
@@ -328,7 +429,7 @@ void wm8960Init() {
                 10 = I2s
                 11 = DSP Mode
              */
-            .FORMAT = 0b00 //
+            .FORMAT = 0b00//
     };
     reg = *(uint16_t *) &r7AudioInterface;
     ESP_ERROR_CHECK(wm8960_writeReg(R7_AUDIO_INTERFACE_1_ADR, reg));
@@ -341,7 +442,7 @@ void wm8960Init() {
                 0 = ADCLRC frame clock for ADC
                 1 = GPIO pin
              */
-            .ALRCGPIO = 1,
+            .ALRCGPIO = 0,
             /*
              *  8-Bit Word Length Select (Used with
                 companding)
@@ -364,21 +465,21 @@ void wm8960Init() {
                 1 = Loopback enabled, ADC data output is fed
                 directly into DAC data input.
              */
-            .LOOPBACK = 1
+            .LOOPBACK = 0
     };
     reg = *(uint16_t *) &r9AudioInterface;
     ESP_ERROR_CHECK(wm8960_writeReg(R9_AUDIO_INTERFACE_ADR, reg));
 
     R10_LEFT_DAC_VOLUME_t leftDacVolume = {
             .DACVU = 1, //vol update
-            .LDACVOL =0b10001111  // 0b0000 0000 = mute 0b0000 0001 = -127db 1111 1111 = 0db
+            .LDACVOL =0b11111000  // 0b0000 0000 = mute 0b0000 0001 = -127db 1111 1111 = 0db
     };
     reg = *(uint16_t *) &leftDacVolume;
     ESP_ERROR_CHECK(wm8960_writeReg(R10_LEFT_DAC_VOLUME_ADR, reg));
 
     R11_RIGHT_DAC_VOLUME_t rightDacVolume = {
             .DACVU = 1, //vol update
-            .RDACVOL = 0b10001111 // 0b0000 0000 = mute 0b0000 0001 = -127db 1111 1111 = 0db
+            .RDACVOL = 0b11111000 // 0b0000 0000 = mute 0b0000 0001 = -127db 1111 1111 = 0db
     };
     reg = *(uint16_t *) &rightDacVolume;
     ESP_ERROR_CHECK(wm8960_writeReg(R11_RIGHT_DAC_VOLUME_ADR, reg));
@@ -390,7 +491,7 @@ void wm8960Init() {
             .D3UC = 0,
     };
     reg = *(uint16_t *) &r163DControl;
-    ESP_ERROR_CHECK(wm8960_writeReg(R16_3D_CONTROL_ADR, reg));
+//    ESP_ERROR_CHECK(wm8960_writeReg(R16_3D_CONTROL_ADR, reg));
 
     // automatic level control
     R17_ALC1_t r17Alc1 = {
@@ -511,17 +612,17 @@ void wm8960Init() {
                 ... 0.5dB steps up to
                 1111 1111 = +30dB
              */
-            .LADCVOL = 0b11111111
+            .LADCVOL = 0b1111111
     };
     reg = *(uint16_t *) &leftAdcVolume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R21_LEFT_ADC_VOLUME_ADR, reg));
+    //   ESP_ERROR_CHECK(wm8960_writeReg(R21_LEFT_ADC_VOLUME_ADR, reg));
 
     R22_RIGHT_ADC_VOLUME_t rightAdcVolume = {
             .ADCVU = 1,
-            .RADCVOL = 0b11111111
+            .RADCVOL = 0b1111111
     };
     reg = *(uint16_t *) &rightAdcVolume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R22_RIGHT_ADC_VOLUME_ADR, reg));
+    //  ESP_ERROR_CHECK(wm8960_writeReg(R22_RIGHT_ADC_VOLUME_ADR, reg));
 
     R23_ADDITIONAL_CONTROL_1_t additionalControl1 = {
             .TSDEN = 1, // thermal shutdown enabled
@@ -534,12 +635,12 @@ void wm8960Init() {
                 10: left data = right ADC; right data =right ADC
                 11: left data = right ADC; right data = left ADC
              */
-            .DATSEL = 0b00,
+            .DATSEL = 0b00, /// test ///////
             .TOCLKSEL =0, // page 74 volume upd timeout
             .TOEN = 0
     };
     reg = *(uint16_t *) &additionalControl1;
-    ESP_ERROR_CHECK(wm8960_writeReg(R23_ADDITIONAL_CONTROL_1_ADR, reg));
+    //   ESP_ERROR_CHECK(wm8960_writeReg(R23_ADDITIONAL_CONTROL_1_ADR, reg));
 
     R24_ADDITIONAL_CONTROL_2_t r24AdditionalControl2 = {
             .HPSWEN = 0, // headph switch en
@@ -568,7 +669,7 @@ void wm8960Init() {
             .LRCM=0
     };
     reg = *(uint16_t*)&r24AdditionalControl2;
-    ESP_ERROR_CHECK(wm8960_writeReg(R24_ADDITIONAL_CONTROL_2_ADR, reg));
+    //   ESP_ERROR_CHECK(wm8960_writeReg(R24_ADDITIONAL_CONTROL_2_ADR, reg));
 
     R27_ADDITIONAL_CONTROL_3_t r27AdditionalControl3 = {
             .VROI = 0, // VREF to Analogue Output Resistance
@@ -576,7 +677,7 @@ void wm8960Init() {
             .ADC_ALC_SR = 0x00 // 0=44/48kHz 101=8k
     };
     reg = *(uint16_t*)&r27AdditionalControl3;
-    ESP_ERROR_CHECK(wm8960_writeReg(R27_ADDITIONAL_CONTROL_3_ADR, reg));
+    //   ESP_ERROR_CHECK(wm8960_writeReg(R27_ADDITIONAL_CONTROL_3_ADR, reg));
 
     R28_ANTI_POP_1_t antiPop1 = {
             .POBCTRL = 0, //Selects the bias current source for output amplifiers and VMID buffer
@@ -586,7 +687,7 @@ void wm8960Init() {
             .HPSTBY=0 // headphone standby
     };
     reg = *(uint16_t*)& antiPop1 ;
-    ESP_ERROR_CHECK(wm8960_writeReg(R28_ANTI_POP_1_ADR, reg));
+    //   ESP_ERROR_CHECK(wm8960_writeReg(R28_ANTI_POP_1_ADR, reg));
 
     R29_ANTI_POP_2_t antiPop2 = {
             .DISOP =0, // discharge headphone capacitors
@@ -600,7 +701,7 @@ void wm8960Init() {
     };
     reg = *(uint16_t *) &leftOutMix1;
     ESP_ERROR_CHECK(wm8960_writeReg(R34_LEFT_OUT_MIX_2, reg));
-
+//
     R37_RIGHT_OUT_MIX_2_t rightOutMix2 = {
             .RD2RO = 1, // dac to mix
             .RI2RO =0, // RINPUT3 disable
@@ -613,13 +714,13 @@ void wm8960Init() {
             .L2MO =0 // connect left out mix to mono mixer
     };
     reg = *(uint16_t *) &r38MonoOutMix1;
-    ESP_ERROR_CHECK(wm8960_writeReg(R38_MONO_OUT_MIX_1, reg));
+    //  ESP_ERROR_CHECK(wm8960_writeReg(R38_MONO_OUT_MIX_1, reg));
 
     R39_MONO_OUT_MIX_2_t r39MonoOutMix2 = {
             .R2MO = 0
     };
     reg = *(uint16_t *) &r39MonoOutMix2;
-    ESP_ERROR_CHECK(wm8960_writeReg(R39_MONO_OUT_MIX_2, reg));
+    //  ESP_ERROR_CHECK(wm8960_writeReg(R39_MONO_OUT_MIX_2, reg));
 
     // SPEAKER VOLUME
     R40_LOUT2_VOLUME_t r40Lout2Volume = {
@@ -628,7 +729,7 @@ void wm8960Init() {
             .SPKVU =1 // update volume
     };
     reg = *(uint16_t *) &r40Lout2Volume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R40_LOUT2_VOLUME, reg));
+    //  ESP_ERROR_CHECK(wm8960_writeReg(R40_LOUT2_VOLUME, reg));
 
     R41_ROUT2_VOLUME_t r41Rout2Volume = {
             .SPKRVOL = 0b1111111,
@@ -636,13 +737,13 @@ void wm8960Init() {
             .SPKVU =1
     };
     reg = *(uint16_t *) &r41Rout2Volume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R41_ROUT2_VOLUME, reg));
+    //  ESP_ERROR_CHECK(wm8960_writeReg(R41_ROUT2_VOLUME, reg));
 
     R42_MONOOUT_VOLUME_t r42MonooutVolume = {
             .MOUTVOL = 1 // mono out vol 1=-6db 0=0db
     };
     reg = *(uint16_t *) &r42MonooutVolume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R42_MONOOUT_VOLUME, reg));
+    //  ESP_ERROR_CHECK(wm8960_writeReg(R42_MONOOUT_VOLUME, reg));
 
     R43_INPUT_BOOST_MIXER_1_t r43InputBoostMixer1 = {
             .LIN2BOOST =0b000, // LINPUT2 to boost mixer volume  000 = mute 001=-12db 111=+6db
@@ -663,14 +764,14 @@ void wm8960Init() {
             .LB2LOVOL = 0b00 // bypass volume 0=0 111=-21db
     };
     reg = *(uint16_t *) &r45Bypass1;
-    ESP_ERROR_CHECK(wm8960_writeReg(R45_BYPASS_1, reg));
+    // ESP_ERROR_CHECK(wm8960_writeReg(R45_BYPASS_1, reg));
 
     R46_BYPASS_2_t r46Bypass2 = {
             .RB2RO = 0,
             .RB2ROVOL =0b00
     };
     reg = *(uint16_t *) &r46Bypass2;
-    ESP_ERROR_CHECK(wm8960_writeReg(R46_BYPASS_2, reg));
+    // ESP_ERROR_CHECK(wm8960_writeReg(R46_BYPASS_2, reg));
 
     //R48_ADDITIONAL_CONTROL_4_t //default
 
@@ -678,85 +779,9 @@ void wm8960Init() {
             .SPK_OP_EN = 0b11 // enable both speakers 0b01=left only
     };
     reg = *(uint16_t *) &classDControl1;
-    ESP_ERROR_CHECK(wm8960_writeReg(R49_CLASS_D_CTRL_1, reg));
+    // ESP_ERROR_CHECK(wm8960_writeReg(R49_CLASS_D_CTRL_1, reg));
 
     //R51_CLASS_D_CONTROL_3_t speaker boost settings default
 
 
-}
-
-/*void wm8960_initial()
-{
-    wm8960_writeReg(0x0f, 0x00);
-    wm8960_writeReg(0x19, 1<<8 | 1<<7 | 1<<6);
-    wm8960_writeReg(0x1A, 1<<8 | 1<<7 | 1<<6 | 1<<5 | 1<<4 | 1<<3);
-    wm8960_writeReg(0x2F, 1<<3 | 1<<2);
-
-    //Configure clock
-    //MCLK->div1->SYSCLK->DAC/ADC sample Freq = 25MHz(MCLK)/2*256 = 48.8kHz
-    wm8960_writeReg(0x04, 0x0000);
-
-    //Configure ADC/DAC
-    wm8960_writeReg(0x05, 0x0000);
-
-    //Configure audio interface
-    //I2S format 16 bits word length
-    wm8960_writeReg(0x07, 0x0002);
-
-    //Configure HP_L and HP_R OUTPUTS
-    wm8960_writeReg(0x02, 0x006F | 0x0100);  //LOUT1 Volume Set
-    wm8960_writeReg(0x03, 0x006F | 0x0100);  //ROUT1 Volume Set
-
-    //Configure SPK_RP and SPK_RN
-    wm8960_writeReg(0x28, 0x007F | 0x0100); //Left Speaker Volume
-    wm8960_writeReg(0x29, 0x007F | 0x0100); //Right Speaker Volume
-
-    //Enable the OUTPUTS
-    wm8960_writeReg(0x31, 0x00F7); //Enable Class D Speaker Outputs
-
-    //Configure DAC volume
-    wm8960_writeReg(0x0a, 0x00FF | 0x0100);
-    wm8960_writeReg(0x0b, 0x00FF | 0x0100);
-
-    //3D
-//  wm8960_writeReg(0x10, 0x001F);
-
-    //Configure MIXER
-    wm8960_writeReg(0x22, 1<<8 | 1<<7);
-    wm8960_writeReg(0x25, 1<<8 | 1<<7);
-
-    //Jack Detect
-    wm8960_writeReg(0x18, 1<<6 | 0<<5);
-    wm8960_writeReg(0x17, 0x01C3);
-    wm8960_writeReg(0x30, 0x0009);//0x000D,0x0005
-}*/
-
-///
-/// \param args
-void i2s_example_write_task(void *args) {
-    i2c_init();
-    i2s_init();
-    wm8960Init();
-
-    double angle = 0.0f;
-    for (int i = 0; i < EXAMPLE_BUFF_SIZE; i=i+2) {
-            samples[i] = (uint16_t) (32000 * sin(angle));
-            samples[i+1] = (uint16_t) (32000 * sin(angle));
-            angle = 2*PI*i*EXAMPLE_BUFF_SIZE;
-    }
-
-    size_t w_bytes = 0;
-    while (1) {
-
-//        /* Write i2s data */
-        if (i2s_channel_write(tx_handle, samples, EXAMPLE_BUFF_SIZE, &w_bytes, 1000) == ESP_OK) {
-//           // printf("Write Task: i2s write %d bytes\n", w_bytes);
-//        } else {
-//            printf("Write Task: i2s write failed\n");
-//        }
-            //vTaskDelay(10);
-
-
-        }
-    }
 }

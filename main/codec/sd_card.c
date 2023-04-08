@@ -24,18 +24,21 @@
 const int WAVE_HEADER_SIZE = 44;
 
 #define TRACK_NAME_MAX_LEN (32)
-
-
 #define WAVE_FREQ_HZ    (100)
 #define PI              (3.14159265)
 #define SAMPLE_PER_CYCLE (SAMPLE_RATE/WAVE_FREQ_HZ)
 #define EXAMPLE_BUFF_SIZE (SAMPLE_PER_CYCLE*2)
 
 
-
 static const char *TAG = "sdcard";
 sdmmc_host_t host = SDMMC_HOST_DEFAULT();
 sdmmc_card_t *card;
+
+static uint32_t files_n_at_mountpoint=0;
+
+uint32_t get_files_count_at_mp (void) {
+    return files_n_at_mountpoint;
+}
 
 void mount_sdcard(void)
 {
@@ -48,18 +51,9 @@ void mount_sdcard(void)
     const char mount_point[] = MOUNT_POINT;
     sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
     slot_config.width = 4;
-
-/*    slot_config.clk = SD_CLK_PIN;
-    slot_config.cmd = SD_CMD_PIN;
-    slot_config.d0 = SD_D0_PIN;
-    slot_config.d1 = SD_D1_PIN;
-    slot_config.d2 = SD_D2_PIN;
-    slot_config.d3 = SD_D3_PIN;*/
     slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
-
     ESP_LOGI(TAG, "Mounting filesystem");
     ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
-
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {
             ESP_LOGE(TAG, "Failed to mount filesystem. "
@@ -71,13 +65,19 @@ void mount_sdcard(void)
         return;
     }
     ESP_LOGI(TAG, "Filesystem mounted");
-
-    // Card has been initialized, print its properties
     sdmmc_card_print_info(stdout, card);
 
-    // Use POSIX and C standard library functions to work with files:
+    DIR *d;
+    struct dirent *dir;
+    d = opendir(MOUNT_POINT);
 
-    // First create a file.
+    if (d) {
+        while((dir = readdir(d))!=NULL) {
+            files_n_at_mountpoint++;
+        }
+    }
+
+    /*// First create a file.
     const char *file_hello = MOUNT_POINT"/hello.txt";
 
     ESP_LOGI(TAG, "Opening file %s", file_hello);
@@ -124,11 +124,7 @@ void mount_sdcard(void)
     if (pos) {
         *pos = '\0';
     }
-    ESP_LOGI(TAG, "Read from file: '%s'", line);
-//
-//    // All done, unmount partition and disable SDMMC peripheral
-//    esp_vfs_fat_sdcard_unmount(mount_point, card);
-//    ESP_LOGI(TAG, "Card unmounted");
+    ESP_LOGI(TAG, "Read from file: '%s'", line);*/
 }
 
 void generate_wav_header(char *wav_header, uint32_t wav_size, uint32_t sample_rate)
@@ -202,8 +198,6 @@ void record_wav(uint32_t rec_time)
 }
 
 
-
-
 void sd_get_file_list (char* list, uint16_t start_n, uint16_t end_n) {
     DIR *d;
     struct dirent *dir;
@@ -212,6 +206,8 @@ void sd_get_file_list (char* list, uint16_t start_n, uint16_t end_n) {
         ESP_LOGW(TAG,"getlist wrong param");
         return;
     }
+
+    list[0] = '\0';
     if (d) {
         seekdir(d, start_n);
 
@@ -224,13 +220,12 @@ void sd_get_file_list (char* list, uint16_t start_n, uint16_t end_n) {
             }
             char track_name[TRACK_NAME_MAX_LEN + 2] = {}; // add place for 2 symbols \n and \0
             strncpy(track_name, dir->d_name, name_len);
-            if (i < (end_n - start_n)) {
-                track_name[name_len] = '\n';  // insert new string symbol if it is not the last filename
-            }
+            track_name[name_len] = '\n';  // insert new string symbol if it is not the last filename
             track_name[name_len + 1] = '\0';  // insert terminator
             strcat(list, track_name); // now we can safely use strcat
-
         }
+
+        if (strlen(list)>1) {list[strlen(list)-1] = '\0';}
 
         closedir(d);
     }
