@@ -132,6 +132,7 @@ void i2s_task(void *args) {
 
     while (1) {
 
+        if (needRead == 0) {
             esp_err_t  ret = ESP_OK;
             ret=i2s_write(I2S_NUM_0, &samples[samples_idx_w][0], N_FRAMES * sizeof(uint16_t), &bytes_written_now, portMAX_DELAY);
             printf("bytes written i2s %d\n", bytes_written_now);
@@ -142,6 +143,8 @@ void i2s_task(void *args) {
             if (samples_idx_w == N_DESC) samples_idx_w=0;
 
             needRead=1;
+        }
+
 
         portYIELD();
     }
@@ -156,24 +159,23 @@ void wav_task(void *args){
     while (1){
 
         if (needRead) {
-            if (first) {
-                samples_idx_w=1;
-                samples_idx_r=0;
-                n_bytes_from_file = wav_read_n_bytes(samples, (N_FRAMES*N_DESC) * sizeof(uint16_t));
-
-                if (n_bytes_from_file)
-                {
-                    first=0;
-
-                }
-
-            }
-            else{
+//            if (first) {
+//                samples_idx_w=1;
+//                samples_idx_r=0;
+//                n_bytes_from_file = wav_read_n_bytes(samples, (N_FRAMES*N_DESC) * sizeof(uint16_t));
+//
+//                if (n_bytes_from_file)
+//                {
+//                    first=0;
+//                }
+//
+//            }
+//            else{
                 n_bytes_from_file = wav_read_n_bytes(&samples[samples_idx_r][0], (N_FRAMES) * sizeof(uint16_t));
                 ++samples_idx_r;
                 if (samples_idx_r == N_DESC) samples_idx_r = 0;
                 needRead = 0;
-            }
+           // }
 
         }
 
