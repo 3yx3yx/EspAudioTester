@@ -35,10 +35,16 @@ uint32_t wav_open_file (char* filename) {
 uint32_t wav_read_n_bytes (void* buf, uint32_t n) {
     if (cur_file == NULL) return 0;
     uint32_t ret = fread(buf,1,n,cur_file);
-    //fseek(cur_file,n,SEEK_CUR);
     return ret;
 }
 
+uint8_t wav_rewind (void) {
+    if (cur_file == NULL) return 0;
+    rewind(cur_file);
+    fseek(cur_file, WAVE_HEADER_SIZE, SEEK_SET);
+
+    return 0xFF;
+}
 
 uint32_t wav_get_size (char* filename) {
     FILE* f;

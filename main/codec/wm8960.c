@@ -24,6 +24,7 @@
 #define SAMPLE_PER_CYCLE (SAMPLE_RATE/WAVE_FREQ_HZ)
 #define N_FRAMES (512)
 #define N_DESC (4)
+#define BUFFERS_PER_SEC ((SAMPLE_RATE*2)/N_FRAMES)
 
 static uint16_t samples[N_DESC][N_FRAMES] = {};
 static uint8_t buff_idx = 0;
@@ -88,6 +89,7 @@ esp_err_t wm8960_writeReg(uint8_t reg, uint16_t dat) {
 
 extern TaskHandle_t i2s_task_handle;
 extern TaskHandle_t wav_task_handle;
+extern TaskHandle_t main_task_handle;
 const uint32_t i2s_msg_mask = 0xFF00;
 
 void i2s_task(void *args) {
@@ -109,7 +111,6 @@ void i2s_task(void *args) {
 
     while (1) {
 
-
         if (xTaskNotifyWait(0,ULONG_MAX,&notif,10) == pdTRUE) { // check the last updated buffer index
             idx_max = notif;
         }
@@ -122,14 +123,16 @@ void i2s_task(void *args) {
                 printf("i2s write failed \n");
             }
             //printf("i2s bytes written %d from %d th buf\n", bytes_written_now, idx);
-            xTaskNotify(wav_task_handle,((idx+1) << 8) & i2s_msg_mask,eSetValueWithOverwrite);
-            ++idx;
-            if (idx == N_DESC) {idx = 0;}
         }
+
+        xTaskNotify(wav_task_handle,((idx+1) << 8) & i2s_msg_mask,eSetValueWithOverwrite); // notify the wav task where i2s task stopped
+        ++idx;
+        if (idx == N_DESC) {idx = 0;}
 
         portYIELD();
     }
 }
+extern SemaphoreHandle_t xGuiSemaphore;
 
 void wav_task(void *args){
 
@@ -138,11 +141,17 @@ void wav_task(void *args){
     const uint32_t ui_msg_mask = 0xFF; // message from ui
     uint8_t read_last_idx = 0;
 
+    bool restart = 0;
+
+    uint64_t peak_sum = 0;
+    uint16_t buffers_sent_cnt = 0;
+
     while (1){
 
         xTaskNotifyWait(0, ULONG_MAX,&notif, portMAX_DELAY);
 
-        if ((notif&ui_msg_mask) == PLAYER_PLAY){
+        if ((notif&ui_msg_mask) == PLAYER_PLAY || restart){
+            restart = true;
             printf("wav task play started\n");
             for (read_last_idx=0; read_last_idx<N_DESC; ++read_last_idx) { // fill the buffers before starting i2s write
                 wav_read_n_bytes(&samples[read_last_idx][0], (N_FRAMES) * sizeof(uint16_t));
@@ -151,7 +160,8 @@ void wav_task(void *args){
             do {
                 xTaskNotifyWait(0, ULONG_MAX, &notif, portMAX_DELAY); // wait if some buffer was sent to i2s or other messages
                 if ((notif & ui_msg_mask) == PLAYER_STOP) {
-                    printf("wav task stopped by button\n");
+                    printf("wav stopped from gui\n");
+                    restart = false;
                     break; // stop the file reading
                 } else if ((notif & i2s_msg_mask)) { // if msg from i2s task
 
@@ -162,20 +172,42 @@ void wav_task(void *args){
                         ++read_last_idx;
                         if (read_last_idx >= N_DESC) { read_last_idx = 0; }
                         n_bytes_from_file = wav_read_n_bytes(&samples[read_last_idx][0], (N_FRAMES) * sizeof(uint16_t));
+                        ++buffers_sent_cnt;
 
                     } while (read_last_idx != i2s_write_last_idx);
 
                     xTaskNotify(i2s_task_handle,read_last_idx,eSetValueWithOverwrite); //  notify the i2s task which buffer is the latest
+
+                    if (buffers_sent_cnt >= BUFFERS_PER_SEC) {// notify main gui task each 0.1 sec to upd elapsed time and send average audio amplitude
+                        peak_sum = 0;
+                        for (int i=0; i<N_FRAMES; i++) {
+                            peak_sum += samples[read_last_idx][i];
+                        }
+                        peak_sum /= N_FRAMES;
+                        float val = (float)peak_sum/UINT16_MAX;
+                        val *= 100;
+                        xTaskNotify(main_task_handle, val, eSetValueWithOverwrite);
+                        buffers_sent_cnt = 0;
+                    }
                     portYIELD();
                 }
             } while (n_bytes_from_file);
 
+
+            if (restart) {
+                printf("wav end\n");
+                if (wav_rewind()){
+                    // update the position bar etc.
+                    //
+                }
+            }
             // cleanup the buffers when playback stopped
-            printf("wav task stopped\n");
             i2s_zero_dma_buffer(I2S_NUM_0);
-            for (int i = 0; i < N_DESC; i++)
-                for (int j = 0; j<N_FRAMES; j++)
+            for (int i = 0; i < N_DESC; i++) {
+                for (int j = 0; j < N_FRAMES; j++) {
                     samples[i][j] = 0;
+                }
+            }
         }
 
         portYIELD();

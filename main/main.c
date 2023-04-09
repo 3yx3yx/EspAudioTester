@@ -31,7 +31,7 @@ static void pwm_init(void);
 SemaphoreHandle_t xGuiSemaphore;
 TaskHandle_t wav_task_handle = NULL;
 TaskHandle_t i2s_task_handle = NULL;
-
+TaskHandle_t main_task_handle = NULL;
 
 void app_main(void) {
 
@@ -83,7 +83,7 @@ void app_main(void) {
     uint8_t noInputEventCnt =0;
 
 
-
+    main_task_handle = xTaskGetCurrentTaskHandle();
     xTaskCreatePinnedToCore(i2s_task,"i2sTask", 4096, NULL, 1,&i2s_task_handle,0);
     xTaskCreatePinnedToCore(wav_task,"wavTask", 4096, NULL, 1,&wav_task_handle,1);
 
@@ -215,7 +215,9 @@ void set_pwm_backlight (uint8_t percent){
     ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0));
 }
 
-
+void set_vu_slider (int val){
+    lv_slider_set_value(ui_mixer_vu_bar_slider, val, LV_ANIM_OFF);
+}
 
 
 /*void print_info(void) {

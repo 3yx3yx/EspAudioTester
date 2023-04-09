@@ -24,6 +24,9 @@ void (*prevScreenUpd) (int, button_t*);
 
 #define TRACK_NUM_MAX 10
 static int file_selected_pos= 0;
+static int file_selected_pos_prev= 0;
+uint32_t track_len_sec = 0;
+uint32_t track_elapsed_sec = 0;
 
 void changeScreen (lv_obj_t* screen){
     lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
@@ -133,9 +136,38 @@ static void openRecMenu (void){                                       //record
     chartSeries = lv_chart_add_series(ui_chart, lv_color_white(), LV_CHART_AXIS_PRIMARY_Y);
 
 }
+
+static void increment_elapsed_time (int inc) {
+    char s [10] = "";
+    track_elapsed_sec += inc;
+    if (track_elapsed_sec < 0) track_elapsed_sec = 0;
+    if (track_elapsed_sec > track_len_sec) track_elapsed_sec -= track_len_sec;
+
+    if ((track_elapsed_sec % 60) < 10) { // add a zero for better look
+        sprintf(s, "%d:0%d", track_elapsed_sec/60, track_elapsed_sec % 60);
+    } else {
+        sprintf(s, "%d:%d", track_elapsed_sec/60, track_elapsed_sec % 60);
+    }
+
+    lv_label_set_text(ui_elapsed_time_label, s);
+
+    int pos = ((double)track_elapsed_sec/track_len_sec)*100;
+
+    lv_slider_set_value(ui_timePosSlider, pos, LV_ANIM_OFF);
+}
+
 static void openPlayMenu (void){                                   //play
     changeScreen(ui_recPlayScreen);
     currentScreenUpd = ui_updatePlayScreen;
+
+    if (file_selected_pos == file_selected_pos_prev) {
+        return;
+    }
+
+    file_selected_pos_prev = file_selected_pos;
+
+    track_elapsed_sec = 0;
+
     lv_img_set_src(ui_rec_play_right_button, &ui_img_play_png );
     lv_label_set_text(ui_elapsed_time_label, " ");
     lv_label_set_text(ui_rec_play_track_len_label, "0.00");
@@ -148,9 +180,9 @@ static void openPlayMenu (void){                                   //play
     lv_chart_set_type(ui_chart, LV_CHART_TYPE_BAR);
     chartSeries = lv_chart_add_series(ui_chart, lv_color_white(), LV_CHART_AXIS_PRIMARY_Y);
 
-
     char fname [255] = "";
     get_nth_file_name(file_selected_pos,fname);
+
     uint32_t wav_size = wav_get_size(fname);
 
     if (wav_size == 0) { // if cannot read the file
@@ -158,6 +190,7 @@ static void openPlayMenu (void){                                   //play
         lv_label_set_text(ui_rec_play_track_len_label, "ERROR");
         return;
     }
+
 
     // draw the audio amplitude diagram
     FILE* f = fopen(fname,"r");
@@ -185,7 +218,7 @@ static void openPlayMenu (void){                                   //play
     fclose(f);
 
     // calculate and show track duration
-    uint32_t track_len_sec = wav_size /  BYTE_RATE;
+    track_len_sec = wav_size /  BYTE_RATE;
     char duration_label [10] = "";
     sprintf(duration_label, "%d:%d", track_len_sec/60, track_len_sec % 60);
     lv_label_set_text(ui_rec_play_track_len_label, duration_label);
@@ -440,15 +473,17 @@ void ui_updateRecScreen (int encoder_delta, button_t* button_event){
 }
 
 extern TaskHandle_t wav_task_handle;
+bool started = 0;
 
 void ui_updatePlayScreen (int encoder_delta, button_t* button_event){
 
     static bool paused = 0;
 
+
     if (button_event != NULL) {
         if (button_event->pin == BTN_ENC_PIN) {
-            if (!paused) {
-                paused = true;
+            if (!started) {
+                started = true;
                 lv_img_set_src(ui_rec_play_right_button, &ui_img_pause_png);
                 // start playing
                 //
@@ -456,12 +491,16 @@ void ui_updatePlayScreen (int encoder_delta, button_t* button_event){
                 get_nth_file_name(file_selected_pos,fname);
                 wav_open_file(fname);
                 xTaskNotify(wav_task_handle,PLAYER_PLAY,eSetBits);
-            }else {
-                paused = false;
+            }else if (started && !paused) {
+                paused = true;
                 lv_img_set_src(ui_rec_play_right_button, &ui_img_play_png);
                 // pause
                 //
                 xTaskNotify(wav_task_handle,PLAYER_STOP,eSetBits);
+            } else if (started && paused) {
+                paused = false;
+                xTaskNotify(wav_task_handle,PLAYER_PLAY,eSetBits);
+                lv_img_set_src(ui_rec_play_right_button, &ui_img_pause_png);
             }
         }
 
@@ -470,9 +509,16 @@ void ui_updatePlayScreen (int encoder_delta, button_t* button_event){
         }
 
         if (escapeButtonEvent(button_event)) {
-            // mute codec
-            //
+            started = false;
+            // stop audio
+            xTaskNotify(wav_task_handle,PLAYER_STOP,eSetBits);
         }
+    }
+
+
+    uint32_t val = 0;
+    if ( xTaskNotifyWait(0,ULONG_MAX,&val, 10) == pdTRUE) {
+        increment_elapsed_time(1);
     }
 
 }
@@ -503,6 +549,16 @@ void ui_updatePlayerMixer (int encoder_delta, button_t* button_event) {
     }
 
     if (button_event != NULL) {
+
+        if (escapeButtonEvent(button_event)) {
+            // stop audio
+            //
+            printf("esc btn event \n");
+            started = false;
+            xTaskNotify(wav_task_handle,PLAYER_STOP,eSetValueWithOverwrite);
+            return;
+
+        }
 
         if (button_event->pin == BTN_LEFT_PIN){ // left btn => esc to play menu
             if (objects[i_focused] != NULL) {
@@ -535,15 +591,16 @@ void ui_updatePlayerMixer (int encoder_delta, button_t* button_event) {
             }
         } //if (objects[i_focused] != NULL)
 
-        if (escapeButtonEvent(button_event)) {
-            // mute codec
-            //
-        }
     } // if button event
 
-    // to do : update vu bar from codec data
+    // update vu bar from wav data
     //
-    //
+    uint32_t val = 0;
+    if ( xTaskNotifyWait(0,ULONG_MAX,&val, 10) == pdTRUE) {
+        lv_slider_set_value(ui_mixer_vu_bar_slider, val, LV_ANIM_ON);
+        increment_elapsed_time(1);
+    }
+
 }
 
 void ui_updateAcceptDeclineScreen (int encoder_delta, button_t* button_event){
