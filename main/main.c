@@ -87,6 +87,8 @@ void app_main(void) {
     xTaskCreatePinnedToCore(i2s_task,"i2sTask", 4096, NULL, 1,&i2s_task_handle,0);
     xTaskCreatePinnedToCore(wav_task,"wavTask", 4096, NULL, 1,&wav_task_handle,1);
 
+
+
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10));
 

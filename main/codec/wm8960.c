@@ -81,9 +81,9 @@ esp_err_t wm8960_writeReg(uint8_t reg, uint16_t dat) {
     esp_err_t ret =
             i2c_master_write_to_device(I2C_NUM_0, WM8960_ADDRESS, I2C_Data, 2, pdMS_TO_TICKS(100));
 
-    vTaskDelay(pdMS_TO_TICKS(5));
+    vTaskDelay(pdMS_TO_TICKS(15));
 
-    printf("i2c ret=%d reg = %d data0="BYTE_TO_BINARY_PATTERN" data 1="BYTE_TO_BINARY_PATTERN"\n",reg, ret, BYTE_TO_BINARY(I2C_Data[0]), BYTE_TO_BINARY(I2C_Data[1]));
+    printf("i2c reg=%d ret = %d data0="BYTE_TO_BINARY_PATTERN" data 1="BYTE_TO_BINARY_PATTERN"\n",reg, ret, BYTE_TO_BINARY(I2C_Data[0]), BYTE_TO_BINARY(I2C_Data[1]));
     return ret;
 }
 
@@ -91,6 +91,11 @@ extern TaskHandle_t i2s_task_handle;
 extern TaskHandle_t wav_task_handle;
 extern TaskHandle_t main_task_handle;
 const uint32_t i2s_msg_mask = 0xFF00;
+
+enum  {
+    WORKMODE_PLAYBACK = 1,
+    WORKMODE_RECORD
+}i2s_workmode;
 
 void i2s_task(void *args) {
 
@@ -108,19 +113,27 @@ void i2s_task(void *args) {
     volatile uint8_t idx = 0;
     uint32_t notif = 0;
     uint8_t idx_max = 0;
+    uint8_t workmode = 0;
 
     while (1) {
 
         if (xTaskNotifyWait(0,ULONG_MAX,&notif,10) == pdTRUE) { // check the last updated buffer index
-            idx_max = notif;
+            idx_max = notif & 0xFF;
+            if (notif & 0xFF00) workmode = (notif & 0xFF00)>>8;
         }
 
         if (idx != idx_max) {
 
-            ret = i2s_write(I2S_NUM_0, &samples[idx][0], N_FRAMES*sizeof(uint16_t) , &bytes_written_now,
-                            portMAX_DELAY);
+            if (workmode == WORKMODE_PLAYBACK) {
+                ret = i2s_write(I2S_NUM_0, &samples[idx][0], N_FRAMES*sizeof(uint16_t) , &bytes_written_now,
+                                portMAX_DELAY);
+            } else if (workmode == WORKMODE_RECORD) {
+                ret = i2s_read(I2S_NUM_0, &samples[idx][0], N_FRAMES*sizeof(uint16_t) , &bytes_written_now,
+                                portMAX_DELAY);
+            }
+
             if (ret != ESP_OK) {
-                printf("i2s write failed \n");
+                printf("i2s failed \n");
             }
             //printf("i2s bytes written %d from %d th buf\n", bytes_written_now, idx);
         }
@@ -134,23 +147,26 @@ void i2s_task(void *args) {
 }
 extern SemaphoreHandle_t xGuiSemaphore;
 
+
+
 void wav_task(void *args){
 
     volatile size_t n_bytes_from_file = 0;
     uint32_t notif = 0;
     const uint32_t ui_msg_mask = 0xFF; // message from ui
     uint8_t read_last_idx = 0;
-
     bool restart = 0;
-
     uint64_t peak_sum = 0;
     uint16_t buffers_sent_cnt = 0;
+
+
 
     while (1){
 
         xTaskNotifyWait(0, ULONG_MAX,&notif, portMAX_DELAY);
-
-        if ((notif&ui_msg_mask) == PLAYER_PLAY || restart){
+        //printf("notif %d\n", notif);
+        if ((notif&ui_msg_mask) == PLAYER_PLAY || restart) {
+            if (restart) printf("RESTART\n");
             restart = true;
             printf("wav task play started\n");
             for (read_last_idx=0; read_last_idx<N_DESC; ++read_last_idx) { // fill the buffers before starting i2s write
@@ -173,21 +189,23 @@ void wav_task(void *args){
                         if (read_last_idx >= N_DESC) { read_last_idx = 0; }
                         n_bytes_from_file = wav_read_n_bytes(&samples[read_last_idx][0], (N_FRAMES) * sizeof(uint16_t));
                         ++buffers_sent_cnt;
-
-                    } while (read_last_idx != i2s_write_last_idx);
-
-                    xTaskNotify(i2s_task_handle,read_last_idx,eSetValueWithOverwrite); //  notify the i2s task which buffer is the latest
-
-                    if (buffers_sent_cnt >= BUFFERS_PER_SEC) {// notify main gui task each 0.1 sec to upd elapsed time and send average audio amplitude
-                        peak_sum = 0;
-                        for (int i=0; i<N_FRAMES; i++) {
+                        for (int i=0; i<N_FRAMES; i++) {  // calc average sample value
                             peak_sum += samples[read_last_idx][i];
                         }
-                        peak_sum /= N_FRAMES;
+
+                    } while (read_last_idx != i2s_write_last_idx);
+                    //  notify the i2s task which buffer is the latest and what is the work mode
+                    xTaskNotify(i2s_task_handle,read_last_idx | (WORKMODE_PLAYBACK << 8),eSetValueWithOverwrite);
+
+                    if (buffers_sent_cnt >= BUFFERS_PER_SEC) {// notify main gui task each 1 sec to upd elapsed time and send average audio amplitude
+
+                        peak_sum /= N_FRAMES*buffers_sent_cnt;
                         float val = (float)peak_sum/UINT16_MAX;
-                        val *= 100;
+                        val = 100 + 2*20*logf(val); // convert -0..-50db scale to 0-100 range
+                        if (val<0 ) val = 0;
                         xTaskNotify(main_task_handle, val, eSetValueWithOverwrite);
                         buffers_sent_cnt = 0;
+                        peak_sum = 0;
                     }
                     portYIELD();
                 }
@@ -195,11 +213,7 @@ void wav_task(void *args){
 
 
             if (restart) {
-                printf("wav end\n");
-                if (wav_rewind()){
-                    // update the position bar etc.
-                    //
-                }
+                wav_rewind();
             }
             // cleanup the buffers when playback stopped
             i2s_zero_dma_buffer(I2S_NUM_0);
@@ -208,6 +222,8 @@ void wav_task(void *args){
                     samples[i][j] = 0;
                 }
             }
+        } else if ((notif&ui_msg_mask) == RECORD_START) {
+            xTaskNotify(i2s_task_handle, N_DESC-1 | (WORKMODE_PLAYBACK << 8),eSetValueWithOverwrite);
         }
 
         portYIELD();
@@ -215,6 +231,105 @@ void wav_task(void *args){
 
 
     }
+}
+
+
+///
+/// \param percent
+/// \return db value
+float codec_set_speaker_vol (uint8_t percent) {
+    uint16_t reg = 0;
+    const uint16_t vol_max = 0b1111111;
+    const uint16_t vol_min = 0b0110000;
+    const float max_db = 6.00f;
+    const float min_db = -73.0f;
+    float db = ((max_db - min_db)/100)*(percent) + min_db;
+
+    uint16_t vol = 0;
+    if (percent != 0) {
+        vol = (uint16_t) (((float) (vol_max - vol_min) / 100.0f) * (percent) + vol_min);
+    }
+
+    vol &= vol_max;
+
+/*    R40_LOUT2_VOLUME_t r40Lout2Volume = {
+            .SPKLVOL = vol, // left speaker vol 1111 111 =+6db 0110000=-73db 0=mute
+            .SPKLZC = 1, // zero cross vol upd
+            .SPKVU =1 // update volume
+    };
+    reg = *(uint16_t *) &r40Lout2Volume;*/
+
+    reg = (1<<8) | (1<<7) | (vol);
+    wm8960_writeReg(R40_LOUT2_VOLUME, reg);
+    vTaskDelay(10);
+    wm8960_writeReg(R41_ROUT2_VOLUME, reg);
+    vTaskDelay(10);
+
+    db = roundf(db);
+    return db;
+}
+
+float codec_set_dac_vol (uint8_t percent){
+    uint16_t reg = 0;
+    const uint16_t vol_max = 0xFF;
+    const uint16_t vol_min = 1;
+    const float max_db = 0.00f;
+    const float min_db = -127.0f;
+    float db = ((max_db - min_db)/100)*(percent) + min_db;
+    db = roundf(db);
+
+    uint16_t vol = 0;
+    if (percent != 0) {
+        vol = (uint16_t) (((float) (vol_max - vol_min) / 100.0f) * (percent) + vol_min);
+    }
+
+    vol &= vol_max;
+
+/*    R10_LEFT_DAC_VOLUME_t leftDacVolume = {
+            .DACVU = 1, //vol update
+            .LDACVOL =vol  // 0b0000 0000 = mute 0b0000 0001 = -127db 1111 1111 = 0db
+    };
+    reg = *(uint16_t *) &leftDacVolume;*/
+    reg = (1<<8) | vol;
+    wm8960_writeReg(R10_LEFT_DAC_VOLUME_ADR, reg);
+    vTaskDelay(20);
+    wm8960_writeReg(R11_RIGHT_DAC_VOLUME_ADR, reg);
+    vTaskDelay(20);
+
+    return db;
+}
+
+///
+/// \param percent
+/// \return db value
+float codec_set_hp_vol (uint8_t percent) {
+    uint16_t reg = 0;
+    const uint16_t vol_max = 0b1111111;
+    const uint16_t vol_min = 0b0110000;
+    const float max_db = 6.00f;
+    const float min_db = -73.0f;
+    float db = ((max_db - min_db)/100)*(percent) + min_db;
+
+    uint16_t vol = 0;
+    if (percent != 0) {
+        vol = (uint16_t)(((float)(vol_max - vol_min) / 100.0f) * (percent) + vol_min);
+    }// 0 = mute
+
+    vol &= vol_max;
+//    R2_LOUT1_VOLUME_t lout1Volume = {
+//            .OUT1VU = 1, // write 1 to update headphone vol
+//            .LO1ZC = 1, // update on zero cross
+//            .LOUT1VOL = vol //127 max=+6db, 0110000=-73db, 0 = mute, 1db steps
+//    };
+//    reg = *(uint16_t *) &lout1Volume;
+    reg = (1<<8) | (1<<7) | (vol);
+    wm8960_writeReg(R2_LOUT1_VOLUME_ADR, reg);
+    vTaskDelay(10);
+    wm8960_writeReg(R3_ROUT1_VOLUME_ADR, reg);
+    vTaskDelay(10);
+
+    db = roundf(db);
+    return db;
 }
 
 void wm8960Init() {
@@ -406,23 +521,7 @@ void wm8960Init() {
     reg = *(uint16_t *) &adcrSignalPath;
     ESP_ERROR_CHECK(wm8960_writeReg(R33_ADCR_SIGNAL_PATH, reg));
 
-    R2_LOUT1_VOLUME_t lout1Volume = {
-            .OUT1VU = 1, // write 1 to update headphone vol
-            .LO1ZC = 0, // update on zero cross
-            .LOUT1VOL = 0b1111000 //127 max=+6db, 0110000=-73db, 0 = mute, 1db steps
-    };
-    reg = *(uint16_t *) &lout1Volume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R2_LOUT1_VOLUME_ADR, reg));
-
-    R3_ROUT1_VOLUME_t rout1Volume = {
-            .OUT1VU = 1,
-            .RO1ZC =0,
-            .ROUT1VOL = 0b1111000
-    };
-    reg = *(uint16_t *) &rout1Volume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R3_ROUT1_VOLUME_ADR, reg));
-
-
+    codec_set_hp_vol(HP_VOL_DEFAULT);
 
     R5_ADC_DAC_CONTROL_CTR1_t adcDacControlCtr1 = {
             .DACDIV2 = 0, // dac attenuator -6db 0=disable
@@ -504,19 +603,7 @@ void wm8960Init() {
     reg = *(uint16_t *) &r9AudioInterface;
     ESP_ERROR_CHECK(wm8960_writeReg(R9_AUDIO_INTERFACE_ADR, reg));
 
-    R10_LEFT_DAC_VOLUME_t leftDacVolume = {
-            .DACVU = 1, //vol update
-            .LDACVOL =0b11111111  // 0b0000 0000 = mute 0b0000 0001 = -127db 1111 1111 = 0db
-    };
-    reg = *(uint16_t *) &leftDacVolume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R10_LEFT_DAC_VOLUME_ADR, reg));
-
-    R11_RIGHT_DAC_VOLUME_t rightDacVolume = {
-            .DACVU = 1, //vol update
-            .RDACVOL = 0b11111111 // 0b0000 0000 = mute 0b0000 0001 = -127db 1111 1111 = 0db
-    };
-    reg = *(uint16_t *) &rightDacVolume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R11_RIGHT_DAC_VOLUME_ADR, reg));
+    codec_set_dac_vol(DAC_VOL_DEFAULT);
 
     R16_3D_CONTROL_t r163DControl = {
             .D3DEPTH = 0b1111, // 3d effect 0b1111= 100% 3d effect
@@ -756,22 +843,7 @@ void wm8960Init() {
     reg = *(uint16_t *) &r39MonoOutMix2;
     ESP_ERROR_CHECK(wm8960_writeReg(R39_MONO_OUT_MIX_2, reg));
 
-    // SPEAKER VOLUME
-    R40_LOUT2_VOLUME_t r40Lout2Volume = {
-            .SPKLVOL = 0b1110000, // left speaker vol 1111 111 =+6db 0110000=-73db 0=mute
-            .SPKLZC = 1, // zero cross vol upd
-            .SPKVU =1 // update volume
-    };
-    reg = *(uint16_t *) &r40Lout2Volume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R40_LOUT2_VOLUME, reg));
-
-    R41_ROUT2_VOLUME_t r41Rout2Volume = {
-            .SPKRVOL = 0b1110000,
-            .SPKLZC =1,
-            .SPKVU =1
-    };
-    reg = *(uint16_t *) &r41Rout2Volume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R41_ROUT2_VOLUME, reg));
+    codec_set_speaker_vol(SPK_VOL_DEFAULT);
 
     R42_MONOOUT_VOLUME_t r42MonooutVolume = {
             .MOUTVOL = 1 // mono out vol 1=-6db 0=0db
@@ -819,3 +891,4 @@ void wm8960Init() {
 
 
 }
+

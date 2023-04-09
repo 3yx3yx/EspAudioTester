@@ -11,9 +11,11 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 
-enum { // enum with signals from UI to playback task
+enum { // enum with signals from UI to audio tasks
     PLAYER_STOP=1,
     PLAYER_PLAY,
+    RECORD_START,
+    RECORD_STOP
 };
 
 void set_pwm_backlight (uint8_t percent);

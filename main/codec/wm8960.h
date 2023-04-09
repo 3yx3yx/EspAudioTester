@@ -16,6 +16,9 @@
 #include "main.h"
 
 #define WM8960_ADDRESS 0x1A //AUDIO CODEC ADDRESS
+#define SPK_VOL_DEFAULT (0)
+#define HP_VOL_DEFAULT (90)
+#define DAC_VOL_DEFAULT (100)
 
 #define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
 #define BYTE_TO_BINARY(byte)  \
@@ -34,6 +37,10 @@ esp_err_t wm8960_writeReg(uint8_t reg, uint16_t dat);
 void wm8960Init();
 void i2s_task(void *args);
 void wav_task(void *args);
+
+float codec_set_speaker_vol (uint8_t percent);
+float codec_set_hp_vol (uint8_t percent);
+float codec_set_dac_vol (uint8_t percent);
 
 enum {
     R0_LEFT_INPUT_VOLUME_ADR,
