@@ -148,64 +148,62 @@ void i2s_task(void *args) {
 extern SemaphoreHandle_t xGuiSemaphore;
 
 
-
-void wav_task(void *args){
+void wav_task(void *args) {
 
     volatile size_t n_bytes_from_file = 0;
     uint32_t notif = 0;
     const uint32_t ui_msg_mask = 0xFF; // message from ui
-    uint8_t read_last_idx = 0;
+    uint8_t last_idx = 0;
     bool restart = 0;
     uint64_t peak_sum = 0;
-    uint16_t buffers_sent_cnt = 0;
+    uint16_t buffers_cnt = 0;
+    uint8_t i2s_last_idx = 0;
 
 
+    while (1) {
 
-    while (1){
-
-        xTaskNotifyWait(0, ULONG_MAX,&notif, portMAX_DELAY);
+        xTaskNotifyWait(0, ULONG_MAX, &notif, portMAX_DELAY);
         //printf("notif %d\n", notif);
-        if ((notif&ui_msg_mask) == PLAYER_PLAY || restart) {
+        if ((notif & ui_msg_mask) == PLAYER_PLAY || restart) {
             if (restart) printf("RESTART\n");
             restart = true;
             printf("wav task play started\n");
-            for (read_last_idx=0; read_last_idx<N_DESC; ++read_last_idx) { // fill the buffers before starting i2s write
-                wav_read_n_bytes(&samples[read_last_idx][0], (N_FRAMES) * sizeof(uint16_t));
+            for (last_idx = 0; last_idx < N_DESC; ++last_idx) { // fill the buffers before starting i2s write
+                wav_read_n_bytes(&samples[last_idx][0], (N_FRAMES) * sizeof(uint16_t));
             }
-            xTaskNotify(i2s_task_handle,read_last_idx-1,eSetValueWithOverwrite); // notify the i2s task which buffer is the latest
+            xTaskNotify(i2s_task_handle, last_idx - 1,
+                        eSetValueWithOverwrite); // notify the i2s task which buffer is the latest
             do {
-                xTaskNotifyWait(0, ULONG_MAX, &notif, portMAX_DELAY); // wait if some buffer was sent to i2s or other messages
+                xTaskNotifyWait(0, ULONG_MAX, &notif,
+                                portMAX_DELAY); // wait if some buffer was sent to i2s or other messages
                 if ((notif & ui_msg_mask) == PLAYER_STOP) {
                     printf("wav stopped from gui\n");
                     restart = false;
                     break; // stop the file reading
                 } else if ((notif & i2s_msg_mask)) { // if msg from i2s task
 
-                    uint8_t i2s_write_last_idx = ((notif & i2s_msg_mask)>>8)-1; // take last transmitted buffer index
+                    i2s_last_idx = ((notif & i2s_msg_mask) >> 8) - 1; // take last transmitted buffer index
 
                     do { // fill the buffers until we will fill the last transmitted buffer
 
-                        ++read_last_idx;
-                        if (read_last_idx >= N_DESC) { read_last_idx = 0; }
-                        n_bytes_from_file = wav_read_n_bytes(&samples[read_last_idx][0], (N_FRAMES) * sizeof(uint16_t));
-                        ++buffers_sent_cnt;
-                        for (int i=0; i<N_FRAMES; i++) {  // calc average sample value
-                            peak_sum += samples[read_last_idx][i];
+                        ++last_idx;
+                        if (last_idx >= N_DESC) { last_idx = 0; }
+                        n_bytes_from_file = wav_read_n_bytes(&samples[last_idx][0], (N_FRAMES) * sizeof(uint16_t));
+                        ++buffers_cnt;
+                        for (int i = 0; i < N_FRAMES; i++) {  // calc average sample value
+                            peak_sum += samples[last_idx][i];
                         }
 
-                    } while (read_last_idx != i2s_write_last_idx);
+                    } while (last_idx != i2s_last_idx);
                     //  notify the i2s task which buffer is the latest and what is the work mode
-                    xTaskNotify(i2s_task_handle,read_last_idx | (WORKMODE_PLAYBACK << 8),eSetValueWithOverwrite);
-
-                    if (buffers_sent_cnt >= BUFFERS_PER_SEC) {// notify main gui task each 1 sec to upd elapsed time and send average audio amplitude
-
-                        peak_sum /= N_FRAMES*buffers_sent_cnt;
-                        float val = (float)peak_sum/UINT16_MAX;
-                        val = 100 + 2*20*logf(val); // convert -0..-50db scale to 0-100 range
-                        if (val<0 ) val = 0;
+                    xTaskNotify(i2s_task_handle, last_idx | (WORKMODE_PLAYBACK << 8), eSetValueWithOverwrite);
+                    // notify main gui task each 1 sec to upd elapsed time and send average audio amplitude
+                    if (buffers_cnt >= BUFFERS_PER_SEC) {
+                        peak_sum /= N_FRAMES * buffers_cnt;
+                        float val = (float) peak_sum / UINT16_MAX;
+                        if ((val = 100 + 2 * 20 * logf(val)) < 0) val = 0;
                         xTaskNotify(main_task_handle, val, eSetValueWithOverwrite);
-                        buffers_sent_cnt = 0;
-                        peak_sum = 0;
+                        buffers_cnt = peak_sum = 0;
                     }
                     portYIELD();
                 }
@@ -222,13 +220,50 @@ void wav_task(void *args){
                     samples[i][j] = 0;
                 }
             }
-        } else if ((notif&ui_msg_mask) == RECORD_START) {
-            xTaskNotify(i2s_task_handle, N_DESC-1 | (WORKMODE_PLAYBACK << 8),eSetValueWithOverwrite);
+        } else if ((notif & ui_msg_mask) == RECORD_START) {
+
+            xTaskNotify(i2s_task_handle, N_DESC - 1 | (WORKMODE_PLAYBACK << 8), eSetValueWithOverwrite);
+            volatile uint16_t seconds = 0;
+            volatile uint32_t bytes_written_to_file = 0;
+            const uint16_t timeout_sec = 3600 * 12; // 12 hours
+            do {
+
+                xTaskNotifyWait(0, ULONG_MAX, &notif, portMAX_DELAY); //wait read from i2s or other messages
+                if ((notif & ui_msg_mask) == RECORD_STOP) {
+                    printf("rec stop\n");
+                    break;
+                } else if ((notif & i2s_msg_mask)) { // if msg from i2s task
+                    i2s_last_idx = ((notif & i2s_msg_mask) >> 8) - 1;
+                    do { // fill the buffers until we will fill the last transmitted buffer
+
+                        ++last_idx;
+                        if (last_idx >= N_DESC) { last_idx = 0; }
+                        bytes_written_to_file = wav_write_n_bytes(&samples[last_idx][0], (N_FRAMES) * sizeof(uint16_t));
+                        ++buffers_cnt;
+                        for (int i = 0; i < N_FRAMES; i++) {  // calc average sample value
+                            peak_sum += samples[last_idx][i];
+                        }
+
+                    } while ( (last_idx != i2s_last_idx) && (bytes_written_to_file !=0 ) );
+
+                    //  notify the i2s task which buffer is the latest and what is the work mode
+                    xTaskNotify(i2s_task_handle, last_idx | (WORKMODE_PLAYBACK << 8), eSetValueWithOverwrite);
+                    // notify main gui task each 1 sec to upd elapsed time and send average audio amplitude
+                    if (buffers_cnt >= BUFFERS_PER_SEC) {
+                        ++seconds;
+                        peak_sum /= N_FRAMES * buffers_cnt;
+                        float val = (float) peak_sum / UINT16_MAX;
+                        if ((val = 100 + 2 * 20 * logf(val)) < 0) val = 0;
+                        xTaskNotify(main_task_handle, val, eSetValueWithOverwrite);
+                        buffers_cnt = peak_sum = 0;
+                    }
+                    portYIELD();
+                }
+
+            } while ((seconds < timeout_sec) && (bytes_written_to_file != 0));
         }
 
-        portYIELD();
-
-
+     portYIELD();
 
     }
 }

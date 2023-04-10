@@ -464,36 +464,47 @@ void ui_updateTrackListScreen (int encoder_delta, button_t* button_event){
 }
 
 void ui_updateRecScreen (int encoder_delta, button_t* button_event){
-    static bool started = 0;
+    static bool rec_started = 0;
     static bool paused = 0;
 
     if (button_event != NULL) {
         if (button_event->pin == BTN_ENC_PIN) {
-            if (!started) {
-                started = true;
-                lv_img_set_src(ui_rec_play_right_button, &ui_img_pause_png);
-                lv_img_set_src(ui_rec_play_left_button, &ui_img_stop_png);
+            if (!rec_started) {
                 // start recording
                 //
-            }else if (started && !paused) {
+                if (wav_start_record()) {
+                    xTaskNotify(wav_task_handle, RECORD_START, eSetValueWithOverwrite);
+                    rec_started = true;
+                    lv_img_set_src(ui_rec_play_right_button, &ui_img_pause_png);
+                    lv_img_set_src(ui_rec_play_left_button, &ui_img_stop_png);
+                } else {
+                    lv_label_set_text(ui_elapsed_time_label, "ERROR");
+                }
+
+            }else if (rec_started && !paused) {
                 paused = true;
                 lv_img_set_src(ui_rec_play_right_button, &ui_img_rec_png);
                 lv_img_set_src(ui_rec_play_left_button, &ui_img_mixer_png);
                 //pause record
                 //
-            } else if (started && paused) {
+                xTaskNotify(wav_task_handle,RECORD_STOP,eSetValueWithOverwrite);
+            } else if (rec_started && paused) {
                 paused = false;
                 lv_img_set_src(ui_rec_play_right_button, &ui_img_pause_png);
                 lv_img_set_src(ui_rec_play_left_button, &ui_img_stop_png);
                 // resume record
                 //
+                xTaskNotify(wav_task_handle,RECORD_START,eSetValueWithOverwrite);
             }
         }
 
         if (button_event->pin == BTN_LEFT_PIN) {
             if (lv_img_get_src(ui_rec_play_left_button) == &ui_img_mixer_png) {
                 openMixerMenu();
-            } else { openAcceptDeclineMenu();}
+            } else {
+                xTaskNotify(wav_task_handle,RECORD_STOP,eSetValueWithOverwrite);
+                openAcceptDeclineMenu();
+            }
         }
 
         if (escapeButtonEvent(button_event)) {
@@ -514,7 +525,7 @@ void ui_updatePlayScreen (int encoder_delta, button_t* button_event){
         if (escapeButtonEvent(button_event) || file_error) {
             started = false;
             // stop audio
-            xTaskNotify(wav_task_handle,PLAYER_STOP,eSetBits);
+            xTaskNotify(wav_task_handle,PLAYER_STOP,eSetValueWithOverwrite);
             return;
         }
         if (button_event->pin == BTN_ENC_PIN) {
@@ -526,16 +537,16 @@ void ui_updatePlayScreen (int encoder_delta, button_t* button_event){
                 char fname [255] = "";
                 get_nth_file_name(file_selected_pos,fname);
                 wav_open_file(fname);
-                xTaskNotify(wav_task_handle,PLAYER_PLAY,eSetBits);
+                xTaskNotify(wav_task_handle,PLAYER_PLAY,eSetValueWithOverwrite);
             }else if (started && !paused) {
                 paused = true;
                 lv_img_set_src(ui_rec_play_right_button, &ui_img_play_png);
                 // pause
                 //
-                xTaskNotify(wav_task_handle,PLAYER_STOP,eSetBits);
+                xTaskNotify(wav_task_handle,PLAYER_STOP,eSetValueWithOverwrite);
             } else if (started && paused) {
                 paused = false;
-                xTaskNotify(wav_task_handle,PLAYER_PLAY,eSetBits);
+                xTaskNotify(wav_task_handle,PLAYER_PLAY,eSetValueWithOverwrite);
                 lv_img_set_src(ui_rec_play_right_button, &ui_img_pause_png);
             }
         }
@@ -670,6 +681,17 @@ void ui_updatePlayerMixer (int encoder_delta, button_t* button_event) {
 }
 
 void ui_updateAcceptDeclineScreen (int encoder_delta, button_t* button_event){
+
+    if (button_event != NULL) {
+        if (button_event->pin == BTN_LEFT_PIN) {
+            wav_delete_record();
+        } else if (button_event->pin == BTN_ENC_PIN) {
+            wav_save_record();
+        }
+
+        changeScreen(ui_startScreen);
+        currentScreenUpd = ui_updateStartScreen;
+    }
 
 }
 

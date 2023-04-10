@@ -30,7 +30,42 @@ uint32_t wav_open_file (char* filename) {
     return cur_file_size;
 }
 
+char fname_record[0xFF] = "";
 
+uint8_t wav_start_record (void) {
+    fname_record[0] = '\0';
+    get_new_record_name(fname_record);
+    if (strlen(fname_record) == 0) return 0;
+
+    cur_file = fopen(fname_record, "rw");
+    fseek(cur_file, WAVE_HEADER_SIZE, SEEK_SET);
+
+    return 0xff;
+}
+
+void wav_save_record (void) {
+
+    fseek(cur_file, 0l,SEEK_END);
+    size_t sz = ftell(cur_file);
+    rewind(cur_file);
+    char wav_header[WAVE_HEADER_SIZE];
+
+    generate_wav_header(wav_header,sz,SAMPLE_RATE);
+    fwrite(wav_header, 1, WAVE_HEADER_SIZE, cur_file);
+    fclose(cur_file);
+
+}
+
+void wav_delete_record (void) {
+    fclose(cur_file);
+    unlink(fname_record);
+}
+
+uint32_t wav_write_n_bytes (void* buf, uint32_t n){
+    if (cur_file == NULL) return 0;
+    uint32_t ret = fwrite(buf,1,n,cur_file);
+    return ret;
+}
 
 uint32_t wav_read_n_bytes (void* buf, uint32_t n) {
     if (cur_file == NULL) return 0;

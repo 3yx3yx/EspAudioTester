@@ -215,7 +215,7 @@ void sd_get_file_list (char* list, uint16_t start_n, uint16_t end_n) {
         while ((dir = readdir(d)) != NULL && (i < (end_n - start_n))) {
             i++;
             uint16_t name_len = strlen(dir->d_name);
-            if (name_len > TRACK_NAME_MAX_LEN) { // we will display only first 32 chars
+            if (name_len > TRACK_NAME_MAX_LEN) { // display only first 32 chars
                 name_len = TRACK_NAME_MAX_LEN;
             }
             char track_name[TRACK_NAME_MAX_LEN + 2] = {}; // add place for 2 symbols \n and \0
@@ -229,6 +229,24 @@ void sd_get_file_list (char* list, uint16_t start_n, uint16_t end_n) {
 
         closedir(d);
     }
+}
+
+void get_new_record_name (char* name) {
+    if (name == NULL) return;
+    name[0] = '\0';
+    uint16_t record_idx = 0;
+    struct stat st;
+    char tmp_name[255+1] = "";
+    do{
+
+        tmp_name[0] = '\0';
+        sprintf(tmp_name,MOUNT_POINT"/Record_%d.wav", record_idx);
+        if (++record_idx == 1000) return;
+
+    } while (stat(tmp_name, &st) == 0);
+
+    stpcpy(name,tmp_name);
+
 }
 
 void get_nth_file_name (uint16_t n, char* name) {

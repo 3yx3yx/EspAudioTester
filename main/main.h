@@ -19,6 +19,5 @@ enum { // enum with signals from UI to audio tasks
 };
 
 void set_pwm_backlight (uint8_t percent);
-void set_vu_slider (int val);
 
 #endif //ESP_AUDIOTEST_MAIN_H
