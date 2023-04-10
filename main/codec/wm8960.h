@@ -37,6 +37,7 @@ esp_err_t wm8960_writeReg(uint8_t reg, uint16_t dat);
 void wm8960Init();
 void i2s_task(void *args);
 void wav_task(void *args);
+void file_write_task(void *args);
 
 float codec_set_speaker_vol (uint8_t percent);
 float codec_set_hp_vol (uint8_t percent);

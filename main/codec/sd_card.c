@@ -53,6 +53,7 @@ void mount_sdcard(void)
     slot_config.width = 4;
     slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
     ESP_LOGI(TAG, "Mounting filesystem");
+    host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
     ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {
@@ -126,6 +127,7 @@ void mount_sdcard(void)
     }
     ESP_LOGI(TAG, "Read from file: '%s'", line);*/
 }
+
 
 void generate_wav_header(char *wav_header, uint32_t wav_size, uint32_t sample_rate)
 {

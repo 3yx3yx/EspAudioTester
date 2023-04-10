@@ -15,6 +15,7 @@
 #include "driver/ledc.h"
 #include "wm8960.h"
 #include "sd_card.h"
+#include <unistd.h>
 
 #define TAG "main"
 #define LV_TICK_PERIOD_MS (1)
@@ -32,10 +33,31 @@ SemaphoreHandle_t xGuiSemaphore;
 TaskHandle_t wav_task_handle = NULL;
 TaskHandle_t i2s_task_handle = NULL;
 TaskHandle_t main_task_handle = NULL;
+TaskHandle_t file_task_handle = NULL;
+
+//FILE *f;
+//const char buff [512*32] = {'a'};
+//void write_benchmark_file () {
+//    f = fopen(MOUNT_POINT"/Test_file", "w+");
+//
+//    for (int i = 0; i < 100; i++) {
+//        write(fileno(f),buff,512*32);
+//        //fwrite(buff,1,512,f);
+//    }
+//
+//}
 
 void app_main(void) {
 
     mount_sdcard();
+
+//    TickType_t tim = xTaskGetTickCount();
+//    write_benchmark_file();
+//    tim = xTaskGetTickCount() - tim;
+//    tim /= portTICK_PERIOD_MS;
+//    printf("\n\nFILE BENCHMARK %d ms\n\n", tim);
+//    fclose(f);
+
 
     xGuiSemaphore = xSemaphoreCreateMutex();
     lv_init();
@@ -86,6 +108,7 @@ void app_main(void) {
     main_task_handle = xTaskGetCurrentTaskHandle();
     xTaskCreatePinnedToCore(i2s_task,"i2sTask", 4096, NULL, 1,&i2s_task_handle,0);
     xTaskCreatePinnedToCore(wav_task,"wavTask", 4096, NULL, 1,&wav_task_handle,1);
+    xTaskCreatePinnedToCore(file_write_task,"fileTask", 4096, NULL, 1,&file_task_handle,0);
 
 
 

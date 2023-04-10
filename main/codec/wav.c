@@ -12,11 +12,14 @@
 #include "sd_card.h"
 #include <dirent.h>
 #include "wav.h"
+#include <unistd.h>
 
 #define TAG "Wav:"
 
 static uint32_t cur_file_size = 0;
 static FILE * cur_file = NULL;
+
+int fdesc = 0;
 
 uint32_t wav_open_file (char* filename) {
     if (cur_file != NULL) {
@@ -37,11 +40,17 @@ uint8_t wav_start_record (void) {
     get_new_record_name(fname_record);
     if (strlen(fname_record) == 0) return 0;
     printf("%s\n",fname_record);
+
     cur_file = fopen(fname_record, "a");
-    if (cur_file == NULL) printf("error open file for rec\n");
+
+    if (cur_file == NULL){
+        printf("error open file for rec\n");
+        return 0;
+    }
+    fdesc = fileno(cur_file);
+
     char wav_header[WAVE_HEADER_SIZE] = {0};
     fwrite(wav_header, 1, WAVE_HEADER_SIZE, cur_file);
-    fseek(cur_file, WAVE_HEADER_SIZE, SEEK_SET);
 
     return 0xff;
 }
@@ -54,7 +63,7 @@ void wav_save_record (void) {
     printf ("wav recorded size %d\n", sz);
     fclose(cur_file);
     fopen(fname_record, "r+");
-    
+
     char wav_header[WAVE_HEADER_SIZE];
     generate_wav_header(wav_header,sz-WAVE_HEADER_SIZE,SAMPLE_RATE);
     fwrite(wav_header, 1, WAVE_HEADER_SIZE, cur_file);
@@ -70,8 +79,9 @@ void wav_delete_record (void) {
 }
 
 uint32_t wav_write_n_bytes (void* buf, uint32_t n){
-    if (cur_file == NULL) return 0;
-    uint32_t ret = fwrite(buf,1,n,cur_file);
+    if (cur_file == NULL || fdesc == 0) return 0;
+    //uint32_t ret = fwrite(buf,1,n,cur_file);
+    uint32_t ret = write(fdesc,buf,n);
     return ret;
 }
 
