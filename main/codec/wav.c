@@ -36,8 +36,11 @@ uint8_t wav_start_record (void) {
     fname_record[0] = '\0';
     get_new_record_name(fname_record);
     if (strlen(fname_record) == 0) return 0;
-
-    cur_file = fopen(fname_record, "rw");
+    printf("%s\n",fname_record);
+    cur_file = fopen(fname_record, "a");
+    if (cur_file == NULL) printf("error open file for rec\n");
+    char wav_header[WAVE_HEADER_SIZE] = {0};
+    fwrite(wav_header, 1, WAVE_HEADER_SIZE, cur_file);
     fseek(cur_file, WAVE_HEADER_SIZE, SEEK_SET);
 
     return 0xff;
@@ -45,18 +48,23 @@ uint8_t wav_start_record (void) {
 
 void wav_save_record (void) {
 
-    fseek(cur_file, 0l,SEEK_END);
+    if (cur_file == NULL) return;
+    fseek(cur_file, 0,SEEK_END);
     size_t sz = ftell(cur_file);
-    rewind(cur_file);
+    printf ("wav recorded size %d\n", sz);
+    fclose(cur_file);
+    fopen(fname_record, "r+");
+    
     char wav_header[WAVE_HEADER_SIZE];
-
-    generate_wav_header(wav_header,sz,SAMPLE_RATE);
+    generate_wav_header(wav_header,sz-WAVE_HEADER_SIZE,SAMPLE_RATE);
     fwrite(wav_header, 1, WAVE_HEADER_SIZE, cur_file);
     fclose(cur_file);
 
 }
 
 void wav_delete_record (void) {
+    if (cur_file == NULL) return;
+
     fclose(cur_file);
     unlink(fname_record);
 }

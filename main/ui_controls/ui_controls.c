@@ -503,6 +503,7 @@ void ui_updateRecScreen (int encoder_delta, button_t* button_event){
                 openMixerMenu();
             } else {
                 xTaskNotify(wav_task_handle,RECORD_STOP,eSetValueWithOverwrite);
+                vTaskDelay(pdMS_TO_TICKS(50));
                 openAcceptDeclineMenu();
             }
         }

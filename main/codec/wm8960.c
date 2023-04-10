@@ -113,13 +113,14 @@ void i2s_task(void *args) {
     volatile uint8_t idx = 0;
     uint32_t notif = 0;
     uint8_t idx_max = 0;
-    uint8_t workmode = 0;
+
 
     while (1) {
+        uint8_t workmode = 0;
 
         if (xTaskNotifyWait(0,ULONG_MAX,&notif,10) == pdTRUE) { // check the last updated buffer index
             idx_max = notif & 0xFF;
-            if (notif & 0xFF00) workmode = (notif & 0xFF00)>>8;
+            workmode = (notif & 0xFF00)>>8;
         }
 
         if (idx != idx_max) {
@@ -130,12 +131,13 @@ void i2s_task(void *args) {
             } else if (workmode == WORKMODE_RECORD) {
                 ret = i2s_read(I2S_NUM_0, &samples[idx][0], N_FRAMES*sizeof(uint16_t) , &bytes_written_now,
                                 portMAX_DELAY);
+                if (ret != ESP_OK) {printf("i2s fail\n");}
+                ret = i2s_write(I2S_NUM_0, &samples[idx][0], N_FRAMES*sizeof(uint16_t) , &bytes_written_now,
+                               portMAX_DELAY);
             }
 
-            if (ret != ESP_OK) {
-                printf("i2s failed \n");
-            }
-            //printf("i2s bytes written %d from %d th buf\n", bytes_written_now, idx);
+            if (ret != ESP_OK) {printf("i2s fail\n");}
+
         }
 
         xTaskNotify(wav_task_handle,((idx+1) << 8) & i2s_msg_mask,eSetValueWithOverwrite); // notify the wav task where i2s task stopped
@@ -222,7 +224,7 @@ void wav_task(void *args) {
             }
         } else if ((notif & ui_msg_mask) == RECORD_START) {
 
-            xTaskNotify(i2s_task_handle, N_DESC - 1 | (WORKMODE_PLAYBACK << 8), eSetValueWithOverwrite);
+            xTaskNotify(i2s_task_handle, (N_DESC - 1) | (WORKMODE_RECORD << 8), eSetValueWithOverwrite);
             volatile uint16_t seconds = 0;
             volatile uint32_t bytes_written_to_file = 0;
             const uint16_t timeout_sec = 3600 * 12; // 12 hours
@@ -240,27 +242,29 @@ void wav_task(void *args) {
                         if (last_idx >= N_DESC) { last_idx = 0; }
                         bytes_written_to_file = wav_write_n_bytes(&samples[last_idx][0], (N_FRAMES) * sizeof(uint16_t));
                         ++buffers_cnt;
-                        for (int i = 0; i < N_FRAMES; i++) {  // calc average sample value
-                            peak_sum += samples[last_idx][i];
-                        }
+//                        for (int i = 0; i < N_FRAMES; i++) {  // calc average sample value
+//                            peak_sum += samples[last_idx][i];
+//                        }
 
                     } while ( (last_idx != i2s_last_idx) && (bytes_written_to_file !=0 ) );
 
                     //  notify the i2s task which buffer is the latest and what is the work mode
-                    xTaskNotify(i2s_task_handle, last_idx | (WORKMODE_PLAYBACK << 8), eSetValueWithOverwrite);
+                    xTaskNotify(i2s_task_handle, last_idx | (WORKMODE_RECORD << 8), eSetValueWithOverwrite);
                     // notify main gui task each 1 sec to upd elapsed time and send average audio amplitude
-                    if (buffers_cnt >= BUFFERS_PER_SEC) {
-                        ++seconds;
-                        peak_sum /= N_FRAMES * buffers_cnt;
-                        float val = (float) peak_sum / UINT16_MAX;
-                        if ((val = 100 + 2 * 20 * logf(val)) < 0) val = 0;
-                        xTaskNotify(main_task_handle, val, eSetValueWithOverwrite);
-                        buffers_cnt = peak_sum = 0;
-                    }
+//                    if (buffers_cnt >= BUFFERS_PER_SEC) {
+//                        ++seconds;
+//                        peak_sum /= N_FRAMES * buffers_cnt;
+//                        float val = (float) peak_sum / UINT16_MAX;
+//                        if ((val = 100 + 2 * 20 * logf(val)) < 0) val = 0;
+//                        xTaskNotify(main_task_handle, val, eSetValueWithOverwrite);
+//                        buffers_cnt = peak_sum = 0;
+//                    }
                     portYIELD();
                 }
 
             } while ((seconds < timeout_sec) && (bytes_written_to_file != 0));
+
+            printf("rec end\n");
         }
 
      portYIELD();
@@ -521,7 +525,7 @@ void wm8960Init() {
             .IPUV = 1, // 1 will update gain
             .LINMUTE=0, // disable mute
             .LIZC=1, // update gain on zero cross
-            .LINVOL= 0b100111 // default 01011 = 0db 111111=+30db
+            .LINVOL= 0b111000 // default 01011 = 0db 111111=+30db
     };
     reg = *(uint16_t *) &leftInputVolume;
     ESP_ERROR_CHECK(wm8960_writeReg(R0_LEFT_INPUT_VOLUME_ADR, reg));
@@ -530,7 +534,7 @@ void wm8960Init() {
             .IPUV = 1, // 1 will update gain
             .RINMUTE=0, // disable mute
             .RIZC=1, // update gain on zero cross
-            .RINVOL=0b100111 // default 01011 = 0db 111111=+30db
+            .RINVOL=0b111000 // default 01011 = 0db 111111=+30db
     };
     reg = *(uint16_t *) &rightInputVolume;
     ESP_ERROR_CHECK(wm8960_writeReg(R1_RIGHT_INPUT_VOLUME_ADR, reg));
@@ -768,14 +772,14 @@ void wm8960Init() {
                 ... 0.5dB steps up to
                 1111 1111 = +30dB
              */
-            .LADCVOL = 0b1110000
+            .LADCVOL = 0b11111000
     };
     reg = *(uint16_t *) &leftAdcVolume;
     ESP_ERROR_CHECK(wm8960_writeReg(R21_LEFT_ADC_VOLUME_ADR, reg));
 
     R22_RIGHT_ADC_VOLUME_t rightAdcVolume = {
             .ADCVU = 1,
-            .RADCVOL = 0b1110000
+            .RADCVOL = 0b11111000
     };
     reg = *(uint16_t *) &rightAdcVolume;
     ESP_ERROR_CHECK(wm8960_writeReg(R22_RIGHT_ADC_VOLUME_ADR, reg));
