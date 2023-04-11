@@ -14,12 +14,14 @@
 #include <stdint.h>
 #include "wav.h"
 #include "main.h"
+#include <string.h>
 
 #define WM8960_ADDRESS 0x1A //AUDIO CODEC ADDRESS
 #define SPK_VOL_DEFAULT (0)
 #define HP_VOL_DEFAULT (90)
 #define DAC_VOL_DEFAULT (100)
-
+#define N_FRAMES (512)
+#define N_DESC (4)
 #define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
 #define BYTE_TO_BINARY(byte)  \
   (byte & 0x80 ? '1' : '0'), \

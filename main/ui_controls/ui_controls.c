@@ -150,8 +150,8 @@ static void openRecMenu (void){                                       //record
 static void increment_elapsed_time (int inc) {
     char s [10] = "";
     track_elapsed_sec += inc;
-    if (track_elapsed_sec < 0) track_elapsed_sec = 0;
-    if (track_elapsed_sec > track_len_sec) track_elapsed_sec -= track_len_sec;
+
+    if (track_elapsed_sec > track_len_sec) track_elapsed_sec =0;
 
     if ((track_elapsed_sec % 60) < 10) { // add a zero for better look
         sprintf(s, "%d:0%d", track_elapsed_sec/60, track_elapsed_sec % 60);
@@ -196,6 +196,7 @@ static void openPlayMenu (void){                                   //play
     lv_label_set_text(ui_mixer_db_val,"-0.0");
 
     lv_img_set_src(ui_rec_play_right_button, &ui_img_play_png );
+    lv_img_set_src(ui_rec_play_left_button, &ui_img_mixer_png );
     lv_label_set_text(ui_elapsed_time_label, "0.00");
     lv_label_set_text(ui_rec_play_track_len_label, "0.00");
     lv_slider_set_value(ui_timePosSlider,0, LV_ANIM_OFF);
@@ -212,6 +213,7 @@ static void openPlayMenu (void){                                   //play
     get_nth_file_name(file_selected_pos,fname);
 
     uint32_t wav_size = wav_get_size(fname);
+    uint8_t n_channels = wav_curr_file_get_n_channels();
 
     if (wav_size == 0) { // if cannot read the file
         lv_label_set_text(ui_elapsed_time_label, "ERROR");
@@ -247,7 +249,12 @@ static void openPlayMenu (void){                                   //play
     fclose(f);
 
     // calculate and show track duration
-    track_len_sec = wav_size /  BYTE_RATE;
+    if (n_channels == 2) {
+        track_len_sec = wav_size / BYTE_RATE_44100;
+    } else {
+        track_len_sec = (wav_size*2) / BYTE_RATE_44100;
+    }
+
     char duration_label [10] = "";
     sprintf(duration_label, "%d:%d", track_len_sec/60, track_len_sec % 60);
     lv_label_set_text(ui_rec_play_track_len_label, duration_label);
@@ -316,6 +323,7 @@ void ui_updateStartScreen (int encoder_delta, button_t* button_event){
 
     started = false;
     xTaskNotify(wav_task_handle,PLAYER_STOP,eSetValueWithOverwrite);
+    xTaskNotify(wav_task_handle,RECORD_STOP,eSetValueWithOverwrite);
 
 }
 /**
@@ -511,6 +519,9 @@ void ui_updateRecScreen (int encoder_delta, button_t* button_event){
         if (escapeButtonEvent(button_event)) {
             // mute codec
             //
+            xTaskNotify(wav_task_handle,RECORD_STOP,eSetValueWithOverwrite);
+            vTaskDelay(pdMS_TO_TICKS(50));
+            openAcceptDeclineMenu();
         }
     }
 
@@ -688,6 +699,9 @@ void ui_updateAcceptDeclineScreen (int encoder_delta, button_t* button_event){
             wav_delete_record();
         } else if (button_event->pin == BTN_ENC_PIN) {
             wav_save_record();
+
+            file_selected_pos = 0;
+            file_selected_pos_prev = -1;
         }
 
         changeScreen(ui_startScreen);

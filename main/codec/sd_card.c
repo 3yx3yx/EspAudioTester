@@ -24,6 +24,7 @@
 const int WAVE_HEADER_SIZE = 44;
 
 #define TRACK_NAME_MAX_LEN (32)
+
 #define WAVE_FREQ_HZ    (100)
 #define PI              (3.14159265)
 #define SAMPLE_PER_CYCLE (SAMPLE_RATE/WAVE_FREQ_HZ)
@@ -34,7 +35,7 @@ static const char *TAG = "sdcard";
 sdmmc_host_t host = SDMMC_HOST_DEFAULT();
 sdmmc_card_t *card;
 
-static uint32_t files_n_at_mountpoint=0;
+uint32_t files_n_at_mountpoint=0;
 
 uint32_t get_files_count_at_mp (void) {
     return files_n_at_mountpoint;
@@ -77,63 +78,14 @@ void mount_sdcard(void)
             files_n_at_mountpoint++;
         }
     }
-
-    /*// First create a file.
-    const char *file_hello = MOUNT_POINT"/hello.txt";
-
-    ESP_LOGI(TAG, "Opening file %s", file_hello);
-    FILE *f = fopen(file_hello, "w");
-    if (f == NULL) {
-        ESP_LOGE(TAG, "Failed to open file for writing");
-        return;
-    }
-    fprintf(f, "Hello %s!\n", card->cid.name);
-    fclose(f);
-    ESP_LOGI(TAG, "File written");
-
-    const char *file_foo = MOUNT_POINT"/foo.txt";
-
-    // Check if destination file exists before renaming
-    struct stat st;
-    if (stat(file_foo, &st) == 0) {
-        // Delete it if it exists
-        unlink(file_foo);
-    }
-
-    // Rename original file
-    ESP_LOGI(TAG, "Renaming file %s to %s", file_hello, file_foo);
-    if (rename(file_hello, file_foo) != 0) {
-        ESP_LOGE(TAG, "Rename failed");
-        return;
-    }
-
-    // Open renamed file for reading
-    ESP_LOGI(TAG, "Reading file %s", file_foo);
-    f = fopen(file_foo, "r");
-    if (f == NULL) {
-        ESP_LOGE(TAG, "Failed to open file for reading");
-        return;
-    }
-
-    // Read a line from file
-    char line[64];
-    fgets(line, sizeof(line), f);
-    fclose(f);
-
-    // Strip newline
-    char *pos = strchr(line, '\n');
-    if (pos) {
-        *pos = '\0';
-    }
-    ESP_LOGI(TAG, "Read from file: '%s'", line);*/
 }
 
 
-void generate_wav_header(char *wav_header, uint32_t wav_size, uint32_t sample_rate)
+void generate_wav_header_mono(char *wav_header, uint32_t wav_size, uint32_t sample_rate)
 {
     // See this for reference: http://soundfile.sapp.org/doc/WaveFormat/
     uint32_t file_size = wav_size + WAVE_HEADER_SIZE - 8;
-    uint32_t byte_rate = BYTE_RATE;
+    uint32_t byte_rate = BYTE_RATE_44100 / 2;
 
     const char set_wav_header[] = {
             'R', 'I', 'F', 'F', // ChunkID
@@ -142,10 +94,10 @@ void generate_wav_header(char *wav_header, uint32_t wav_size, uint32_t sample_ra
             'f', 'm', 't', ' ', // Subchunk1ID
             0x10, 0x00, 0x00, 0x00, // Subchunk1Size (16 for PCM)
             0x01, 0x00, // AudioFormat (1 for PCM)
-            0x02, 0x00, // NumChannels (2 channel)
+            0x01, 0x00, // NumChannels (2 channel)
             sample_rate, sample_rate >> 8, sample_rate >> 16, sample_rate >> 24, // SampleRate
             byte_rate, byte_rate >> 8, byte_rate >> 16, byte_rate >> 24, // ByteRate
-            0x04, 0x00, // BlockAlign
+            0x02, 0x00, // BlockAlign 1=8 bit Mono, 2=8 bit Stereo or 16 bit Mono, 4=16 bit Stereo
             0x10, 0x00, // BitsPerSample (16 bits)
             'd', 'a', 't', 'a', // Subchunk2ID
             wav_size, wav_size >> 8, wav_size >> 16, wav_size >> 24, // Subchunk2Size
@@ -161,9 +113,9 @@ void record_wav(uint32_t rec_time)
     ESP_LOGI(TAG, "Opening file");
 
     char wav_header_fmt[WAVE_HEADER_SIZE];
-    uint32_t wav_size = BYTE_RATE * rec_time;
+    uint32_t wav_size = BYTE_RATE_44100 * rec_time;
     wav_size = EXAMPLE_BUFF_SIZE*2*1000*2;
-    generate_wav_header(wav_header_fmt, wav_size, SAMPLE_RATE);
+    generate_wav_header_mono(wav_header_fmt, wav_size, SAMPLE_RATE);
 
     // First check if file exists before creating a new file.
     struct stat st;
