@@ -187,9 +187,9 @@ static void openPlayMenu (void){                                   //play
     track_elapsed_sec = 0;
 
     codec_set_dac_vol(DAC_VOL_DEFAULT);
-    codec_set_hp_vol(HP_VOL_DEFAULT);
+    codec_set_hp_vol(HP_LINE_VOL_DEFAULT);
     codec_set_speaker_vol(0);
-    lv_arc_set_value(ui_ouputLevelArc, HP_VOL_DEFAULT);
+    lv_arc_set_value(ui_ouputLevelArc, HP_LINE_VOL_DEFAULT);
     lv_obj_clear_state(ui_hp_spk_switch,LV_STATE_CHECKED); // speaker is muted initially
     lv_label_set_text(ui_mixer_arc_value,"-2.0");
     lv_slider_set_value(ui_mixer_slider,DAC_VOL_DEFAULT,LV_ANIM_OFF);

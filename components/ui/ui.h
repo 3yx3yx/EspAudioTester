@@ -22,15 +22,19 @@ extern lv_obj_t * ui_levelMenu;
 extern lv_obj_t * ui_mixer_vu_bar_slider;
 extern lv_obj_t * ui_mixer_slider;
 extern lv_obj_t * ui_mixer_db_val;
+extern lv_obj_t * ui_lineLevelArc;
 extern lv_obj_t * ui_ouputLevelArc;
 extern lv_obj_t * ui_mixer_arc_value;
+extern lv_obj_t * ui_line_out_label;
+extern lv_obj_t * ui_line_level_value;
+extern lv_obj_t * ui_mixer_arc_label;
 extern lv_obj_t * ui_spkIcon;
 extern lv_obj_t * ui_hpIcon;
 extern lv_obj_t * ui_mic_icon;
 extern lv_obj_t * ui_xlr_icon;
 extern lv_obj_t * ui_mic_line_switch;
 extern lv_obj_t * ui_hp_spk_switch;
-extern lv_obj_t * ui_mixer_arc_label;
+extern lv_obj_t * ui_mixer_slider_func_label;
 extern lv_obj_t * ui_recPlayScreen;
 extern lv_obj_t * ui_recPlayMenu;
 extern lv_obj_t * ui_chart;
@@ -52,18 +56,21 @@ extern lv_obj_t * ui_saveLabel;
 extern lv_obj_t * ui_optionsScreen;
 extern lv_obj_t * ui_settingsMenu;
 extern lv_obj_t * ui_phantomSwitch;
-extern lv_obj_t * ui_label48v;
-extern lv_obj_t * ui_spkEnableSwitch;
-extern lv_obj_t * ui_beepEnableSwitch;
+extern lv_obj_t * ui_ALCswitch;
+extern lv_obj_t * ui_attenEnableSwitch;
 extern lv_obj_t * ui_labelPhantom;
-extern lv_obj_t * ui_spkEnableLabel;
-extern lv_obj_t * ui_beepEnableLabel;
+extern lv_obj_t * ui_ALCEnableLabel;
+extern lv_obj_t * ui_attenEnableLabel;
+extern lv_obj_t * ui_xlr_swap_switch;
 extern lv_obj_t * ui_brightness_slider;
 extern lv_obj_t * ui_brightness_label;
+extern lv_obj_t * ui_Labelxlrswap;
+extern lv_obj_t * ui_optionsScreen_Label5;
 extern lv_obj_t * ui_cableTestScreen;
 extern lv_obj_t * ui_cableTesterMenu;
-extern lv_obj_t * ui_acceptIcon;
-extern lv_obj_t * ui_noCableLabel;
+extern lv_obj_t * ui_OK_icon;
+extern lv_obj_t * ui_cableStatus;
+extern lv_obj_t * ui_cableTestScreen_Label3;
 
 
 LV_IMG_DECLARE(ui_img_indicator_ver_png);    // assets/indicator_ver.png
@@ -73,11 +80,12 @@ LV_IMG_DECLARE(ui_img_headphone_png);    // assets/headphone.png
 LV_IMG_DECLARE(ui_img_mic_png);    // assets/mic.png
 LV_IMG_DECLARE(ui_img_xlr_png);    // assets/xlr.png
 LV_IMG_DECLARE(ui_img_mixer_png);    // assets/mixer.png
-LV_IMG_DECLARE(ui_img_play_png);    // assets/play.png
+LV_IMG_DECLARE(ui_img_pause_png);    // assets/pause.png
 LV_IMG_DECLARE(ui_img_accept_png);    // assets/accept.png
-LV_IMG_DECLARE(ui_img_rec_png);
-LV_IMG_DECLARE(ui_img_pause_png);
-LV_IMG_DECLARE(ui_img_stop_png);
+LV_IMG_DECLARE(ui_img_rec_png);    // assets/rec.png
+LV_IMG_DECLARE(ui_img_play_png);    // assets/play.png
+LV_IMG_DECLARE(ui_img_stop_png);    // assets/stop.png
+
 
 
 

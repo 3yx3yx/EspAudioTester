@@ -213,7 +213,7 @@ void wav_task(void *args) {
             vTaskSuspend(i2s_task_handle);
 
             volatile uint16_t seconds = 0;
-            const uint16_t timeout_sec = 3600 * 12; // 12 hours
+            const uint16_t timeout_sec = 3600 * 4; // 4 hours
             uint8_t idx = 0;
             esp_err_t ret = 0;
             size_t bytes_n = 0;
@@ -248,7 +248,6 @@ void wav_task(void *args) {
 
 void file_write_task(void *args) {
     uint32_t notif = 0;
-    uint8_t half_buf_idx = 0;
 
     while (1) {
         xTaskNotifyWait(0, ULONG_MAX, &notif, portMAX_DELAY);
@@ -325,7 +324,7 @@ float codec_set_dac_vol (uint8_t percent){
     return db;
 }
 
-///
+/// headphones are connected to L_out
 /// \param percent
 /// \return db value
 float codec_set_hp_vol (uint8_t percent) {
@@ -351,8 +350,109 @@ float codec_set_hp_vol (uint8_t percent) {
     reg = (1<<8) | (1<<7) | (vol);
     wm8960_writeReg(R2_LOUT1_VOLUME_ADR, reg);
     vTaskDelay(10);
+//    wm8960_writeReg(R3_ROUT1_VOLUME_ADR, reg);
+//    vTaskDelay(10);
+
+    db = roundf(db);
+    return db;
+}
+
+float codec_set_line_out_vol (uint8_t percent) {
+    uint16_t reg = 0;
+    const uint16_t vol_max = 0b1111111;
+    const uint16_t vol_min = 0b0110000;
+    const float max_db = 6.00f;
+    const float min_db = -73.0f;
+    float db = ((max_db - min_db)/100)*(percent) + min_db;
+
+    uint16_t vol = 0;
+    if (percent != 0) {
+        vol = (uint16_t)(((float)(vol_max - vol_min) / 100.0f) * (percent) + vol_min);
+    }// 0 = mute
+
+    vol &= vol_max;
+//    R2_LOUT1_VOLUME_t lout1Volume = {
+//            .OUT1VU = 1, // write 1 to update headphone vol
+//            .LO1ZC = 1, // update on zero cross
+//            .LOUT1VOL = vol //127 max=+6db, 0110000=-73db, 0 = mute, 1db steps
+//    };
+//    reg = *(uint16_t *) &lout1Volume;
+    reg = (1<<8) | (1<<7) | (vol);
+//    wm8960_writeReg(R2_LOUT1_VOLUME_ADR, reg);
+//    vTaskDelay(10);
     wm8960_writeReg(R3_ROUT1_VOLUME_ADR, reg);
     vTaskDelay(10);
+
+    db = roundf(db);
+    return db;
+}
+
+float codec_set_mic_gain (uint8_t percent) {
+    uint16_t reg = 0;
+    const uint16_t vol_max = 0b111111;
+    const uint16_t vol_min = 0b00;
+    const float max_db = 6.00f;
+    const float min_db = -73.0f;
+    float db = ((max_db - min_db)/100)*(percent) + min_db;
+
+    uint16_t vol = 0;
+    if (percent != 0) {
+        vol = (uint16_t)(((float)(vol_max - vol_min) / 100.0f) * (percent) + vol_min);
+    }// 0 = mute
+
+    vol &= vol_max;
+//    R2_LOUT1_VOLUME_t lout1Volume = {
+//            .OUT1VU = 1, // write 1 to update headphone vol
+//            .LO1ZC = 1, // update on zero cross
+//            .LOUT1VOL = vol //127 max=+6db, 0110000=-73db, 0 = mute, 1db steps
+//    };
+//    reg = *(uint16_t *) &lout1Volume;
+    reg = (1<<8) | (1<<7) | (vol);
+    wm8960_writeReg(R2_LOUT1_VOLUME_ADR, reg);
+    vTaskDelay(10);
+//    wm8960_writeReg(R3_ROUT1_VOLUME_ADR, reg);
+//    vTaskDelay(10);
+
+
+    R0_LEFT_INPUT_VOLUME_t leftInputVolume = {
+            .IPUV = 1, // 1 will update gain
+            .LINMUTE=0, // disable mute
+            .LIZC=1, // update gain on zero cross
+            .LINVOL= 0b111000 // default 01011 = 0db 111111=+30db
+    };
+    reg = *(uint16_t *) &leftInputVolume;
+    ESP_ERROR_CHECK(wm8960_writeReg(R0_LEFT_INPUT_VOLUME_ADR, reg));
+
+    R1_RIGHT_INPUT_VOLUME_t rightInputVolume = {
+            .IPUV = 1, // 1 will update gain
+            .RINMUTE=0, // disable mute
+            .RIZC=1, // update gain on zero cross
+            .RINVOL=0b111000 // default 01011 = 0db 111111=+30db
+    };
+    reg = *(uint16_t *) &rightInputVolume;
+    ESP_ERROR_CHECK(wm8960_writeReg(R1_RIGHT_INPUT_VOLUME_ADR, reg));
+
+    R32_ADCL_SIGNAL_PATH_t adclSignalPath = {
+            .LMIC2B = 1, //connect amp out to mixer
+            .LMICBOOST = 0b00, // 0db, 0b11=+29db see page 23
+            .LMN1 = 1, // connect amp input to LINPUT1
+            .LMP2 = 0, // LINPUT2
+            .LMP3 = 0 // LINPUT3
+            //if lmp2 == lmp3 == 0, amp + input is connected to vmid
+    };
+    reg = *(uint16_t *) &adclSignalPath;
+    ESP_ERROR_CHECK(wm8960_writeReg(R32_ADCL_SIGNAL_PATH, reg));
+
+    R33_ADCR_SIGNAL_PATH_t adcrSignalPath = {
+            .RMIC2B =1,
+            .RMICBOOST= 0b00 ,
+            .RMN1 =1,
+            .RMP2=0,
+            .RMP3=0
+    };
+    reg = *(uint16_t *) &adcrSignalPath;
+    ESP_ERROR_CHECK(wm8960_writeReg(R33_ADCR_SIGNAL_PATH, reg));
+
 
     db = roundf(db);
     return db;
@@ -508,46 +608,10 @@ void wm8960Init() {
     ESP_ERROR_CHECK(wm8960_writeReg(R8_CLOCKING_2_ADR, reg));
 
     // input amplifiers
-    R0_LEFT_INPUT_VOLUME_t leftInputVolume = {
-            .IPUV = 1, // 1 will update gain
-            .LINMUTE=0, // disable mute
-            .LIZC=1, // update gain on zero cross
-            .LINVOL= 0b111000 // default 01011 = 0db 111111=+30db
-    };
-    reg = *(uint16_t *) &leftInputVolume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R0_LEFT_INPUT_VOLUME_ADR, reg));
 
-    R1_RIGHT_INPUT_VOLUME_t rightInputVolume = {
-            .IPUV = 1, // 1 will update gain
-            .RINMUTE=0, // disable mute
-            .RIZC=1, // update gain on zero cross
-            .RINVOL=0b111000 // default 01011 = 0db 111111=+30db
-    };
-    reg = *(uint16_t *) &rightInputVolume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R1_RIGHT_INPUT_VOLUME_ADR, reg));
 
-    R32_ADCL_SIGNAL_PATH_t adclSignalPath = {
-            .LMIC2B = 1, //connect amp out to mixer
-            .LMICBOOST = 0b00, // 0db, 0b11=+29db see page 23
-            .LMN1 = 1, // connect amp input to LINPUT1
-            .LMP2 = 0, // LINPUT2
-            .LMP3 = 0 // LINPUT3
-            //if lmp2 == lmp3 == 0, amp + input is connected to vmid
-    };
-    reg = *(uint16_t *) &adclSignalPath;
-    ESP_ERROR_CHECK(wm8960_writeReg(R32_ADCL_SIGNAL_PATH, reg));
-
-    R33_ADCR_SIGNAL_PATH_t adcrSignalPath = {
-            .RMIC2B =1,
-            .RMICBOOST= 0b00 ,
-            .RMN1 =1,
-            .RMP2=0,
-            .RMP3=0
-    };
-    reg = *(uint16_t *) &adcrSignalPath;
-    ESP_ERROR_CHECK(wm8960_writeReg(R33_ADCR_SIGNAL_PATH, reg));
-
-    codec_set_hp_vol(HP_VOL_DEFAULT);
+    codec_set_hp_vol(HP_LINE_VOL_DEFAULT);
+    codec_set_line_out_vol(HP_LINE_VOL_DEFAULT);
 
     R5_ADC_DAC_CONTROL_CTR1_t adcDacControlCtr1 = {
             .DACDIV2 = 0, // dac attenuator -6db 0=disable
@@ -759,14 +823,14 @@ void wm8960Init() {
                 ... 0.5dB steps up to
                 1111 1111 = +30dB
              */
-            .LADCVOL = 0b11111000
+            .LADCVOL = 0xC3   // set to 0 db
     };
     reg = *(uint16_t *) &leftAdcVolume;
     ESP_ERROR_CHECK(wm8960_writeReg(R21_LEFT_ADC_VOLUME_ADR, reg));
 
     R22_RIGHT_ADC_VOLUME_t rightAdcVolume = {
             .ADCVU = 1,
-            .RADCVOL = 0b11111000
+            .RADCVOL = 0xC3
     };
     reg = *(uint16_t *) &rightAdcVolume;
     ESP_ERROR_CHECK(wm8960_writeReg(R22_RIGHT_ADC_VOLUME_ADR, reg));
@@ -908,7 +972,7 @@ void wm8960Init() {
     //R48_ADDITIONAL_CONTROL_4_t //default
 
     R49_CLASS_D_CONTROL_1_t classDControl1 = {
-            .SPK_OP_EN = 0b11 // enable both speakers 0b01=left only
+            .SPK_OP_EN = 0b01 // enable both speakers 0b01=left only
     };
     reg = *(uint16_t *) &classDControl1;
     ESP_ERROR_CHECK(wm8960_writeReg(R49_CLASS_D_CTRL_1, reg));
