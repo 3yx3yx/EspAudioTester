@@ -34,30 +34,11 @@ TaskHandle_t wav_task_handle = NULL;
 TaskHandle_t i2s_task_handle = NULL;
 TaskHandle_t main_task_handle = NULL;
 TaskHandle_t file_task_handle = NULL;
-
-//FILE *f;
-//const char buff [512*32] = {'a'};
-//void write_benchmark_file () {
-//    f = fopen(MOUNT_POINT"/Test_file", "w+");
-//
-//    for (int i = 0; i < 100; i++) {
-//        write(fileno(f),buff,512*32);
-//        //fwrite(buff,1,512,f);
-//    }
-//
-//}
+QueueHandle_t  freq_queue;
 
 void app_main(void) {
 
     mount_sdcard();
-
-//    TickType_t tim = xTaskGetTickCount();
-//    write_benchmark_file();
-//    tim = xTaskGetTickCount() - tim;
-//    tim /= portTICK_PERIOD_MS;
-//    printf("\n\nFILE BENCHMARK %d ms\n\n", tim);
-//    fclose(f);
-
 
     xGuiSemaphore = xSemaphoreCreateMutex();
     lv_init();
@@ -104,11 +85,13 @@ void app_main(void) {
     int encoder_delta=0;
     uint8_t noInputEventCnt =0;
 
+    freq_queue = xQueueCreate(10,sizeof(uint16_t));
 
     main_task_handle = xTaskGetCurrentTaskHandle();
     xTaskCreatePinnedToCore(i2s_task,"i2sTask", 4096, NULL, 1,&i2s_task_handle,0);
     xTaskCreatePinnedToCore(wav_task,"wavTask", 4096, NULL, 1,&wav_task_handle,1);
     xTaskCreatePinnedToCore(file_write_task,"fileTask", 4096, NULL, 1,&file_task_handle,0);
+
 
 
 
@@ -234,6 +217,7 @@ static void pwm_init(void){
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
 }
 void set_pwm_backlight (uint8_t percent){
+    if (percent < 1) percent = 2;
     uint32_t duty = (8191/100)*percent;
     ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty));
     // Update duty to apply the new value

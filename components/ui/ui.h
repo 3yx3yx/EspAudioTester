@@ -62,10 +62,12 @@ extern lv_obj_t * ui_labelPhantom;
 extern lv_obj_t * ui_ALCEnableLabel;
 extern lv_obj_t * ui_attenEnableLabel;
 extern lv_obj_t * ui_xlr_swap_switch;
+extern lv_obj_t * ui_boostEnableSwitch;
 extern lv_obj_t * ui_brightness_slider;
 extern lv_obj_t * ui_brightness_label;
 extern lv_obj_t * ui_Labelxlrswap;
 extern lv_obj_t * ui_optionsScreen_Label5;
+extern lv_obj_t * ui_boostEnableLabel;
 extern lv_obj_t * ui_cableTestScreen;
 extern lv_obj_t * ui_cableTesterMenu;
 extern lv_obj_t * ui_OK_icon;
@@ -82,10 +84,9 @@ LV_IMG_DECLARE(ui_img_xlr_png);    // assets/xlr.png
 LV_IMG_DECLARE(ui_img_mixer_png);    // assets/mixer.png
 LV_IMG_DECLARE(ui_img_pause_png);    // assets/pause.png
 LV_IMG_DECLARE(ui_img_accept_png);    // assets/accept.png
-LV_IMG_DECLARE(ui_img_rec_png);    // assets/rec.png
-LV_IMG_DECLARE(ui_img_play_png);    // assets/play.png
-LV_IMG_DECLARE(ui_img_stop_png);    // assets/stop.png
-
+LV_IMG_DECLARE(ui_img_rec_png);
+LV_IMG_DECLARE(ui_img_stop_png);
+LV_IMG_DECLARE(ui_img_play_png);
 
 
 

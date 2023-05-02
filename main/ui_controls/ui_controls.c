@@ -8,12 +8,16 @@
 #include "wav.h"
 #include "wm8960.h"
 
-#define PRESS(obj) lv_obj_add_state(obj, LV_STATE_PRESSED);
-#define UNPRESS(obj) lv_obj_clear_state(obj, LV_STATE_PRESSED);
-#define FOCUS(obj)  lv_obj_add_state(obj, LV_STATE_FOCUSED);
-#define UNFOCUS(obj)  lv_obj_clear_state(obj, LV_STATE_FOCUSED);
-#define CHECK_OBJ(obj) lv_obj_add_state(obj, LV_STATE_CHECKED);
-#define UNCHECK_OBJ(obj) lv_obj_clear_state(obj, LV_STATE_CHECKED);
+#define PRESS(obj) lv_obj_add_state(obj, LV_STATE_PRESSED)
+#define UNPRESS(obj) lv_obj_clear_state(obj, LV_STATE_PRESSED)
+#define FOCUS(obj)  lv_obj_add_state(obj, LV_STATE_FOCUSED)
+#define UNFOCUS(obj)  lv_obj_clear_state(obj, LV_STATE_FOCUSED)
+#define CHECK_OBJ(obj) lv_obj_add_state(obj, LV_STATE_CHECKED)
+#define UNCHECK_OBJ(obj) lv_obj_clear_state(obj, LV_STATE_CHECKED)
+
+#define IS_PRESSED(obj) (lv_obj_get_state(obj) & LV_STATE_PRESSED)
+#define IS_CHECKED(obj) (lv_obj_get_state(obj) & LV_STATE_CHECKED)
+#define IS_FOCUSED(obj) (lv_obj_get_state(obj) & LV_STATE_FOCUSED)
 
 /**
  * @brief function pointer to current screen update function
@@ -31,6 +35,12 @@ uint32_t track_elapsed_sec = 0;
 extern TaskHandle_t wav_task_handle;
 bool started = 0;
 
+static uint8_t input_gain_slider_val = 50;
+static uint8_t line_out_arc_val = HP_LINE_VOL_DEFAULT;
+static uint8_t monitor_arc_val = HP_LINE_VOL_DEFAULT;
+static uint8_t wave_gen_slider_val = HP_LINE_VOL_DEFAULT;
+static uint8_t wave_gen_freq_arc_val = 50;
+
 void changeScreen (lv_obj_t* screen){
     lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
 }
@@ -46,7 +56,7 @@ static void openCableTestMenu (void);
 
 
 
-static bool escapeButtonEvent (button_t* button_event);
+static bool checkEscapeButtonEvent (button_t* button_event);
 
 enum movableObjects{
     ROLLER,
@@ -84,6 +94,8 @@ static void incrementObj (uint8_t type, lv_obj_t* obj, int inc) {
 static void openMixerMenu(void) {                                    //mixer
     changeScreen(ui_mixerMenuScreen);
     currentScreenUpd = ui_updateMixerScreen;
+
+    xTaskNotify(wav_task_handle,MONITOR_START,eSetValueWithOverwrite);
     lv_obj_clear_flag(ui_mic_line_switch, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(ui_mic_icon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(ui_spkIcon, LV_OBJ_FLAG_HIDDEN);
@@ -126,7 +138,16 @@ static void openWaveGenMenu (void) {                                      //wave
     lv_obj_add_flag(ui_hpIcon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(ui_mixer_slider, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(ui_mixer_db_val, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(ui_mixer_arc_label, "freq");
+
+
+    lv_label_set_text(ui_line_out_label, "freq");
+    lv_label_set_text(ui_mixer_slider_func_label, "out");
+    lv_obj_add_flag(ui_ouputLevelArc, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_mixer_arc_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_mixer_arc_value, LV_OBJ_FLAG_HIDDEN);
+
+    xTaskNotify(wav_task_handle,WAVEGEN_START,eSetValueWithOverwrite);
+
 }
 
 lv_chart_series_t * chartSeries;
@@ -186,9 +207,6 @@ static void openPlayMenu (void){                                   //play
 
     track_elapsed_sec = 0;
 
-    codec_set_dac_vol(DAC_VOL_DEFAULT);
-    codec_set_hp_vol(HP_LINE_VOL_DEFAULT);
-    codec_set_speaker_vol(0);
     lv_arc_set_value(ui_ouputLevelArc, HP_LINE_VOL_DEFAULT);
     lv_obj_clear_state(ui_hp_spk_switch,LV_STATE_CHECKED); // speaker is muted initially
     lv_label_set_text(ui_mixer_arc_value,"-2.0");
@@ -292,7 +310,7 @@ static void openCableTestMenu (void){
     currentScreenUpd = ui_updateCableTestScreen;
 }
 
-static bool escapeButtonEvent (button_t* button_event){
+static bool checkEscapeButtonEvent (button_t* button_event){
     if (button_event == NULL) return false;
     if (button_event->pin == BTN_LEFT_PIN && button_event->wasLong) {
         changeScreen(ui_startScreen);
@@ -302,6 +320,7 @@ static bool escapeButtonEvent (button_t* button_event){
     return false;
 }
 
+static bool first_scr_upd = true;
 
 void ui_updateStartScreen (int encoder_delta, button_t* button_event){
 
@@ -322,8 +341,8 @@ void ui_updateStartScreen (int encoder_delta, button_t* button_event){
     }
 
     started = false;
-    xTaskNotify(wav_task_handle,PLAYER_STOP,eSetValueWithOverwrite);
-    xTaskNotify(wav_task_handle,RECORD_STOP,eSetValueWithOverwrite);
+    xTaskNotify(wav_task_handle,AUDIO_STOP,eSetValueWithOverwrite);
+    first_scr_upd = true;
 
 }
 /**
@@ -346,102 +365,313 @@ void ui_set_battery_bar (int charge) {
     }
 }
 
+
 void ui_updateMixerScreen(int encoder_delta, button_t *button_event) {
 
-    lv_obj_t *objects[] = {NULL, ui_mixer_slider, ui_ouputLevelArc, ui_mic_line_switch, ui_hp_spk_switch};
-    static uint8_t i_focused = 0; // focused obj index in array
-    uint8_t nObj = 4;
-    bool waveGenMode = 0;
-    if (currentScreenUpd == ui_updateWaveGenScreen) { nObj = 2; waveGenMode = 1; } // in wave generator mode switches are hidden
+    static lv_obj_t * cur_obj = NULL;
+    static int i_obj_focused = 0;
+    const int n_objects  = 4;
+    bool need_codec_upd = first_scr_upd;
+    first_scr_upd = false;
 
     if (encoder_delta) {
-        if (objects[i_focused] != NULL) {
-            if (lv_obj_get_state(objects[i_focused]) & LV_STATE_PRESSED) {
-                if (objects[i_focused] == ui_mixer_slider) {
-                    incrementObj(SLIDER, objects[i_focused], encoder_delta);
-                    if (waveGenMode) {
-                        //update generator output
-                        //
-                    } else {
-                        //update input gain
-                        //
-                    }
-                } else if (objects[i_focused] == ui_ouputLevelArc) {
-                    incrementObj(ARC, objects[i_focused], encoder_delta);
-                    if (waveGenMode) {
-                        //update generator freq
-                        //
-                    } else {
-                        //update output level
-                        //
-                    }
+        bool menu_scroll = false;
+        if (cur_obj != NULL) {
+            printf ("obj_i = %d\n", i_obj_focused);
+
+            if (IS_PRESSED(cur_obj)) {
+                if (cur_obj == ui_mixer_slider) {
+                    int cur_val = lv_slider_get_value(ui_mixer_slider);
+                    input_gain_slider_val = encoderCalculatePosition(encoder_delta, cur_val, 0, 100);
+                } else if (cur_obj == ui_lineLevelArc) {
+                    int cur_val = lv_arc_get_value(ui_lineLevelArc);
+                    line_out_arc_val = encoderCalculatePosition(encoder_delta, cur_val, 0, 100);
+                } else if (cur_obj == ui_ouputLevelArc){
+                    int cur_val = lv_arc_get_value(ui_ouputLevelArc);
+                    monitor_arc_val = encoderCalculatePosition(encoder_delta, cur_val, 0, 100);
                 }
-            } else { // if no pressed objects, change focused object
-                UNFOCUS(objects[i_focused]);
-                i_focused = encoderCalculatePosition(encoder_delta, i_focused, 0, nObj);
-                if (objects[i_focused] != NULL) FOCUS(objects[i_focused]);
+
+            } else {
+                UNFOCUS(cur_obj);
+                if (cur_obj == ui_ouputLevelArc) UNFOCUS(ui_lineLevelArc);
+                menu_scroll = true;
             }
-        } else {
-            i_focused = encoderCalculatePosition(encoder_delta, i_focused, 0, nObj);
-            if (objects[i_focused] != NULL) FOCUS(objects[i_focused]);
         }
+
+        if (menu_scroll || cur_obj==NULL) {
+            i_obj_focused = encoderCalculatePosition(encoder_delta, i_obj_focused, 0, n_objects);
+            switch (i_obj_focused) {
+
+                case 0:
+                    cur_obj = NULL;
+                    break;
+                case 1:
+                    cur_obj = ui_mixer_slider;
+                    break;
+                case 2:
+                    cur_obj = ui_mic_line_switch;
+                    break;
+                case 3:
+                    cur_obj = ui_lineLevelArc;
+                    break;
+                case 4:
+                    cur_obj = ui_hp_spk_switch;
+                    break;
+                default:
+                    break;
+
+            }
+
+            if (cur_obj != NULL) {
+                FOCUS(cur_obj);
+            }
+        }
+
+
     }
 
     if (button_event != NULL) {
 
-        if (button_event->pin == BTN_LEFT_PIN && lv_disp_get_scr_prev(NULL)!=ui_recPlayScreen){ // left btn => esc to rec menu
-            if (objects[i_focused] != NULL) {
-                if (!((lv_obj_get_state(objects[i_focused]) & LV_STATE_PRESSED))) openRecMenu();
-            } else openRecMenu();
+        if (button_event->pin == BTN_LEFT_PIN &&
+            lv_disp_get_scr_prev(NULL) == ui_recPlayScreen) { // left btn => esc to rec menu
+            if (cur_obj != NULL) {
+                if (!IS_PRESSED(cur_obj)) {
+                    openRecMenu();
+                    return;
+                }
+            } else {
+                openRecMenu();
+                return;
+            }
         }
 
-        if (objects[i_focused] != NULL) {
-            if (objects[i_focused] == ui_mixer_slider || objects[i_focused] == ui_ouputLevelArc)
-            {
+        if (cur_obj != NULL) {
+            if (cur_obj == ui_lineLevelArc) {
+
                 if (button_event->pin == BTN_ENC_PIN) {
-                    PRESS(objects[i_focused]);
-                } else if (button_event->pin == BTN_LEFT_PIN) {
-                    UNPRESS(objects[i_focused]);
-                }
-            } else if (button_event->pin == BTN_ENC_PIN && !waveGenMode) {
-                if (lv_obj_get_state(objects[i_focused]) & LV_STATE_CHECKED) {
-                    UNCHECK_OBJ(objects[i_focused]);
-                    if (objects[i_focused] == ui_hp_spk_switch) {
-                        // codec disable spk
-                        //
-                    } else if (objects[i_focused] == ui_mic_line_switch) {
-                        // if mic selected disable speaker
-                        UNCHECK_OBJ(ui_hp_spk_switch);
-                        // codec select input channel mic
-                        //
+                    if (IS_PRESSED(ui_lineLevelArc)) {
+                        UNPRESS(ui_lineLevelArc);
+                        PRESS (ui_ouputLevelArc);
+                        cur_obj = ui_ouputLevelArc;
+                    } else {
+                        PRESS(ui_lineLevelArc);
                     }
+                } else if (button_event->pin == BTN_LEFT_PIN) {
+                    UNPRESS(ui_lineLevelArc);
+                }
+
+            } else if (cur_obj == ui_ouputLevelArc) {
+                if (button_event->pin == BTN_ENC_PIN) {
+                    if (IS_PRESSED(ui_ouputLevelArc)) {
+                        UNPRESS(ui_ouputLevelArc);
+                        PRESS (ui_lineLevelArc);
+                        cur_obj = ui_lineLevelArc;
+                    } else {
+                        PRESS(ui_ouputLevelArc);
+                    }
+                } else if (button_event->pin == BTN_LEFT_PIN) {
+                    UNPRESS(ui_ouputLevelArc);
+                }
+            } else if (cur_obj == ui_mixer_slider) {
+                if (button_event->pin == BTN_ENC_PIN) {
+                    PRESS (ui_mixer_slider);
                 } else {
-                    CHECK_OBJ(objects[i_focused]);
-                    if (objects[i_focused] == ui_hp_spk_switch) {
-                        // select xlr input if mic was selected
+                    UNPRESS(ui_mixer_slider);
+                }
+            } else if (cur_obj == ui_mic_line_switch) {
+                if (button_event->pin == BTN_ENC_PIN) {
+                    need_codec_upd = true;
+                    bool checked = IS_CHECKED(ui_mic_line_switch);
+                    if (checked) {
+                        UNCHECK_OBJ(ui_mic_line_switch);
+                        if (IS_CHECKED(ui_hp_spk_switch)) {
+                            UNCHECK_OBJ(ui_hp_spk_switch);
+                            //mute spk
+                            codec_set_speaker_vol(0);
+                        }
+                        codec_set_line_in_gain(0);
+                    } else {
+                        codec_set_mic_gain(0);
                         CHECK_OBJ(ui_mic_line_switch);
-                        // codec enable spk
-                        //
-                    } else if (objects[i_focused] == ui_mic_line_switch) {
-                        // codec select input channel line
-                        //
+                    }
+                }
+            } else if (cur_obj == ui_hp_spk_switch) {
+                need_codec_upd = true;
+                if (button_event->pin == BTN_ENC_PIN) {
+                    if (IS_CHECKED(ui_hp_spk_switch)) {
+                        UNCHECK_OBJ(ui_hp_spk_switch);
+                        codec_set_speaker_vol(0);
+                    } else {
+                        CHECK_OBJ(ui_hp_spk_switch);
+                        codec_set_hp_vol(0);
+                        if (!IS_CHECKED(ui_mic_line_switch)) {
+                            CHECK_OBJ(ui_mic_line_switch);
+                            codec_set_mic_gain(0);
+                        }
                     }
                 }
             }
-        } //if (objects[i_focused] != NULL)
-        if (escapeButtonEvent(button_event)) {
-            // mute codec
-            //
         }
-    } // if button event
+    }
 
+    char s [10] = "";
+    float db = 0;
+
+    if (input_gain_slider_val != lv_slider_get_value(ui_mixer_slider) || need_codec_upd) {
+        if (IS_CHECKED(ui_mic_line_switch)) { //  line selected
+            db = codec_set_line_in_gain(input_gain_slider_val);
+            if (IS_CHECKED(ui_attenEnableSwitch)) {
+                db -= 20;
+            } else if (IS_CHECKED(ui_boostEnableSwitch)) {
+                db += 20;
+            }
+        } else {
+            // db = codec_set_mic_gain(input_gain_slider_val);
+            if (IS_CHECKED(ui_ALCswitch)) {
+                db = codec_set_alc_max(input_gain_slider_val);
+            } else {
+                db = codec_set_mic_gain(input_gain_slider_val);
+            }
+        }
+        sprintf(s, "%.1f",db);
+        lv_label_set_text(ui_mixer_db_val,s);
+
+        lv_slider_set_value(ui_mixer_slider, input_gain_slider_val, LV_ANIM_OFF);
+    }
+
+    if (line_out_arc_val != lv_arc_get_value(ui_lineLevelArc)  || need_codec_upd) {
+
+        db = codec_set_line_out_vol(line_out_arc_val);
+        sprintf(s, "%.1f",db);
+        lv_label_set_text(ui_line_level_value,s);
+        lv_arc_set_value(ui_lineLevelArc, line_out_arc_val);
+
+    }
+
+    if (monitor_arc_val != lv_arc_get_value(ui_ouputLevelArc) || need_codec_upd) {
+
+        if (IS_CHECKED(ui_hp_spk_switch)) {
+            db = codec_set_speaker_vol(monitor_arc_val);
+        } else {
+            db = codec_set_hp_vol(monitor_arc_val);
+        }
+        sprintf(s, "%.1f",db);
+        lv_label_set_text(ui_mixer_arc_value, s);
+        lv_arc_set_value(ui_ouputLevelArc, monitor_arc_val);
+
+    }
+
+    if (checkEscapeButtonEvent(button_event)) {
+        if (cur_obj != NULL) {
+            UNFOCUS(cur_obj);
+            UNPRESS(cur_obj);
+        }
+    }
+    if (need_codec_upd) xTaskNotify(wav_task_handle,MONITOR_START,eSetValueWithOverwrite);
+    need_codec_upd = 0;
     // to do : update vu bar from codec data
     //
     //
 }
 
+
+extern QueueHandle_t freq_queue;
+
 void ui_updateWaveGenScreen (int encoder_delta, button_t* button_event){
-    ui_updateMixerScreen (encoder_delta, button_event); // wavegen and mixer has the same ui objects
+    static lv_obj_t * cur_obj = NULL;
+    static int i_obj_focused = 0;
+    const int n_objects  = 2;
+    bool need_codec_upd = first_scr_upd;
+    first_scr_upd = false;
+
+    if (encoder_delta) {
+        bool menu_scroll = false;
+        if (cur_obj != NULL) {
+
+            if (IS_PRESSED(cur_obj)) {
+                if (cur_obj == ui_mixer_slider) {
+                    int cur_val = lv_slider_get_value(ui_mixer_slider);
+                    wave_gen_slider_val = encoderCalculatePosition(encoder_delta, cur_val, 0, 100);
+                } else if (cur_obj == ui_lineLevelArc) {
+                    int cur_val = lv_arc_get_value(ui_lineLevelArc);
+                    wave_gen_freq_arc_val = encoderCalculatePosition(encoder_delta, cur_val, 0, 100);
+                }
+
+            } else {
+                UNFOCUS(cur_obj);
+                menu_scroll = true;
+            }
+        }
+
+        if (menu_scroll || cur_obj==NULL) {
+            i_obj_focused = encoderCalculatePosition(encoder_delta, i_obj_focused, 0, n_objects);
+            switch (i_obj_focused) {
+
+                case 0:
+                    cur_obj = NULL;
+                    break;
+                case 1:
+                    cur_obj = ui_mixer_slider;
+                    break;
+                case 2:
+                    cur_obj = ui_lineLevelArc;
+                    break;
+                default:
+                    break;
+
+            }
+
+            if (cur_obj != NULL) {
+                FOCUS(cur_obj);
+            }
+        }
+
+
+    }
+
+    checkEscapeButtonEvent(button_event);
+
+    if (button_event != NULL && cur_obj != NULL) {
+        if (button_event->pin == BTN_ENC_PIN) {
+            PRESS(cur_obj);
+        } else if (button_event->pin == BTN_LEFT_PIN) {
+            UNPRESS(cur_obj);
+        }
+    }
+
+    char s [10] = "";
+
+    if (wave_gen_slider_val != lv_slider_get_value(ui_mixer_slider) || need_codec_upd) {
+        float db = codec_set_line_out_vol(wave_gen_slider_val);
+        sprintf(s, "%.1f",db);
+        lv_label_set_text(ui_mixer_db_val,s);
+        lv_slider_set_value(ui_mixer_slider, wave_gen_slider_val, LV_ANIM_OFF);
+    }
+
+    if (wave_gen_freq_arc_val != lv_arc_get_value(ui_lineLevelArc) || need_codec_upd) {
+        static const uint16_t freq_table [101] = {
+                30,40,50,60,70,80,90,100,110,120,130,
+                140,150,160,170,
+                180,190,200,210,220,230,240,250,260,
+                280,300,320,340,360,380,400,420,440,
+                460,480,500,520,540,560,580,600,620,640,
+                680, 700,720,760,800,820,
+                880,900,940,1000,1050,1100,1150,1200,
+                1250,1300,1350,1400,1450,
+                1500,1600,1700,1800,1900,2000,2200,2400,2600,2800,
+                3000,3500,4000,4500,5000,5500,6000,6500,7000,7500,
+                8000,8500,9000,9500,10000,10500,11000,11500,12000,12500,
+                13000,14000,15000,16000,17000,18000,19000,20000,22000
+        };
+
+        lv_arc_set_value(ui_lineLevelArc, wave_gen_freq_arc_val);
+        uint16_t freq = freq_table[wave_gen_freq_arc_val];
+        sprintf(s, "%d",freq);
+        lv_label_set_text(ui_line_level_value,s);
+        xQueueSend(freq_queue, &freq, 20);
+        xTaskNotify(wav_task_handle, WAVEGEN_START,eSetValueWithOverwrite);
+    }
+    need_codec_upd = 0;
 }
 
 void ui_updateTrackListScreen (int encoder_delta, button_t* button_event){
@@ -468,7 +698,7 @@ void ui_updateTrackListScreen (int encoder_delta, button_t* button_event){
         incrementObj(ROLLER, ui_trackListRoller, encoder_delta);
     }
 
-    if (escapeButtonEvent(button_event)) { /*go to menu*/}
+    if (checkEscapeButtonEvent(button_event)) { /*go to menu*/}
 }
 
 void ui_updateRecScreen (int encoder_delta, button_t* button_event){
@@ -495,7 +725,7 @@ void ui_updateRecScreen (int encoder_delta, button_t* button_event){
                 lv_img_set_src(ui_rec_play_left_button, &ui_img_mixer_png);
                 //pause record
                 //
-                xTaskNotify(wav_task_handle,RECORD_STOP,eSetValueWithOverwrite);
+                xTaskNotify(wav_task_handle,AUDIO_STOP,eSetValueWithOverwrite);
             } else if (rec_started && paused) {
                 paused = false;
                 lv_img_set_src(ui_rec_play_right_button, &ui_img_pause_png);
@@ -510,16 +740,16 @@ void ui_updateRecScreen (int encoder_delta, button_t* button_event){
             if (lv_img_get_src(ui_rec_play_left_button) == &ui_img_mixer_png) {
                 openMixerMenu();
             } else {
-                xTaskNotify(wav_task_handle,RECORD_STOP,eSetValueWithOverwrite);
+                xTaskNotify(wav_task_handle,AUDIO_STOP,eSetValueWithOverwrite);
                 vTaskDelay(pdMS_TO_TICKS(50));
                 openAcceptDeclineMenu();
             }
         }
 
-        if (escapeButtonEvent(button_event)) {
+        if (checkEscapeButtonEvent(button_event)) {
             // mute codec
             //
-            xTaskNotify(wav_task_handle,RECORD_STOP,eSetValueWithOverwrite);
+            xTaskNotify(wav_task_handle,AUDIO_STOP,eSetValueWithOverwrite);
             vTaskDelay(pdMS_TO_TICKS(50));
             openAcceptDeclineMenu();
         }
@@ -527,17 +757,16 @@ void ui_updateRecScreen (int encoder_delta, button_t* button_event){
 
 }
 
-void ui_updatePlayScreen (int encoder_delta, button_t* button_event){
+void ui_updatePlayScreen (int encoder_delta, button_t* button_event) {
 
     static bool paused = 0;
 
-
     if (button_event != NULL) {
 
-        if (escapeButtonEvent(button_event) || file_error) {
+        if (checkEscapeButtonEvent(button_event) || file_error) {
             started = false;
             // stop audio
-            xTaskNotify(wav_task_handle,PLAYER_STOP,eSetValueWithOverwrite);
+            xTaskNotify(wav_task_handle,AUDIO_STOP,eSetValueWithOverwrite);
             return;
         }
         if (button_event->pin == BTN_ENC_PIN) {
@@ -555,7 +784,7 @@ void ui_updatePlayScreen (int encoder_delta, button_t* button_event){
                 lv_img_set_src(ui_rec_play_right_button, &ui_img_play_png);
                 // pause
                 //
-                xTaskNotify(wav_task_handle,PLAYER_STOP,eSetValueWithOverwrite);
+                xTaskNotify(wav_task_handle,AUDIO_STOP,eSetValueWithOverwrite);
             } else if (started && paused) {
                 paused = false;
                 xTaskNotify(wav_task_handle,PLAYER_PLAY,eSetValueWithOverwrite);
@@ -566,10 +795,7 @@ void ui_updatePlayScreen (int encoder_delta, button_t* button_event){
         if (button_event->pin == BTN_LEFT_PIN) {
             openPlayerMixerMenu();
         }
-
-
     }
-
 
     uint32_t val = 0;
     if ( xTaskNotifyWait(0,ULONG_MAX,&val, 10) == pdTRUE) {
@@ -581,106 +807,148 @@ void ui_updatePlayScreen (int encoder_delta, button_t* button_event){
 
 void ui_updatePlayerMixer (int encoder_delta, button_t* button_event) {
 
-    lv_obj_t *objects[] = {NULL, ui_mixer_slider,ui_ouputLevelArc,ui_hp_spk_switch};
-    static uint8_t i_focused = 0; // focused obj index in array
-    uint8_t nObj = 3;
+    static lv_obj_t * cur_obj = NULL;
+    static int i_obj_focused = 0;
+    const int n_objects  = 2;
+    bool need_codec_upd = first_scr_upd;
+    first_scr_upd = false;
 
     if (encoder_delta) {
-        if (objects[i_focused] != NULL) {
-            if (lv_obj_get_state(objects[i_focused]) & LV_STATE_PRESSED) {
 
-                int val = 0;
-                float db = 0;
-                char s[10] = "";
+        bool menu_scroll = false;
+        if (cur_obj != NULL) {
 
-                if (objects[i_focused] == ui_ouputLevelArc) {
-                    incrementObj(ARC, objects[i_focused], encoder_delta);
-                    //update output level
-                    //
-                    val = lv_arc_get_value(ui_ouputLevelArc);
-
-                    if (lv_obj_get_state(ui_hp_spk_switch) & LV_STATE_CHECKED) {
-                        db = codec_set_speaker_vol(val);
-                    } else {
-                        db = codec_set_hp_vol(val);
-                    }
-
-                    sprintf(s, "%.1f",db); // set arc center value
-                    lv_label_set_text(ui_mixer_arc_value,s);
-
+            if (IS_PRESSED(cur_obj)) {
+                if (cur_obj == ui_lineLevelArc) {
+                    int cur_val = lv_arc_get_value(ui_lineLevelArc);
+                    line_out_arc_val = encoderCalculatePosition(encoder_delta, cur_val, 0, 100);
+                } else if (cur_obj == ui_ouputLevelArc){
+                    int cur_val = lv_arc_get_value(ui_ouputLevelArc);
+                    monitor_arc_val = encoderCalculatePosition(encoder_delta, cur_val, 0, 100);
                 }
-                if (objects[i_focused] == ui_mixer_slider) {
-                    incrementObj(SLIDER, objects[i_focused], encoder_delta);
-                    //update output level dac
-                    //
-                    val = lv_slider_get_value(ui_mixer_slider);
-                    db = codec_set_dac_vol(val);
-                    sprintf(s, "%.1f",db); // set arc center value
-                    lv_label_set_text(ui_mixer_db_val,s);
 
-                }
-            } else { // if no pressed objects, change focused object
-                UNFOCUS(objects[i_focused]);
-                i_focused = encoderCalculatePosition(encoder_delta, i_focused, 0, nObj);
-                if (objects[i_focused] != NULL) FOCUS(objects[i_focused]);
+            }else {
+                UNFOCUS(cur_obj);
+                if (cur_obj == ui_ouputLevelArc) UNFOCUS(ui_lineLevelArc);
+                menu_scroll = true;
             }
-        } else {
-            i_focused = encoderCalculatePosition(encoder_delta, i_focused, 0, nObj);
-            if (objects[i_focused] != NULL) FOCUS(objects[i_focused]);
         }
+
+        if (menu_scroll || cur_obj==NULL) {
+            i_obj_focused = encoderCalculatePosition(encoder_delta, i_obj_focused, 0, n_objects);
+            switch (i_obj_focused) {
+
+                case 0:
+                    cur_obj = NULL;
+                    break;
+                case 1:
+                    cur_obj = ui_lineLevelArc;
+                    break;
+                case 2:
+                    cur_obj = ui_hp_spk_switch;
+                    break;
+                default:
+                    break;
+
+            }
+
+            if (cur_obj != NULL) {
+                FOCUS(cur_obj);
+            }
+        }
+
+
     }
 
     if (button_event != NULL) {
 
-        if (escapeButtonEvent(button_event)) {
-            // stop audio
-            //
-            printf("esc btn event \n");
-            started = false;
-            xTaskNotify(wav_task_handle,PLAYER_STOP,eSetValueWithOverwrite);
-            return;
-
-        }
-
-        if (button_event->pin == BTN_LEFT_PIN){ // left btn => esc to play menu
-            if (objects[i_focused] != NULL) {
-                if (!((lv_obj_get_state(objects[i_focused]) & LV_STATE_PRESSED))) openPlayMenu(); // if arc is not pressed
-            } else openPlayMenu();
-        }
-
-        if (objects[i_focused] != NULL) {
-            if (objects[i_focused] == ui_ouputLevelArc || objects[i_focused] == ui_mixer_slider)
-            {
-                if (button_event->pin == BTN_ENC_PIN) {
-                    PRESS(objects[i_focused]);
-                } else if (button_event->pin == BTN_LEFT_PIN) {
-                    UNPRESS(objects[i_focused]);
+        if (button_event->pin == BTN_LEFT_PIN &&
+            lv_disp_get_scr_prev(NULL) == ui_recPlayScreen) { // left btn => esc to rec menu
+            if (cur_obj != NULL) {
+                if (!IS_PRESSED(cur_obj)) {
+                    openPlayMenu();
+                    return;
                 }
-            } else if (button_event->pin == BTN_ENC_PIN) {
-                if (lv_obj_get_state(objects[i_focused]) & LV_STATE_CHECKED) {
-                    UNCHECK_OBJ(objects[i_focused]);
-                    if (objects[i_focused] == ui_hp_spk_switch) {
-                        // codec disable spk
-                        //
-                        uint8_t val = lv_arc_get_value(ui_ouputLevelArc);
-                        codec_set_speaker_vol(0);
-                        codec_set_hp_vol(val);
+            } else {
+                openPlayMenu();
+                return;
+            }
+        }
+
+        if (cur_obj != NULL) {
+            if (cur_obj == ui_lineLevelArc) {
+
+                if (button_event->pin == BTN_ENC_PIN) {
+                    if (IS_PRESSED(ui_lineLevelArc)) {
+                        UNPRESS(ui_lineLevelArc);
+                        PRESS (ui_ouputLevelArc);
+                        cur_obj = ui_ouputLevelArc;
+                    } else {
+                        PRESS(ui_lineLevelArc);
                     }
-                } else {
-                    CHECK_OBJ(objects[i_focused]);
-                    if (objects[i_focused] == ui_hp_spk_switch) {
-                        // codec enable spk
-                        //
-                        uint8_t val = lv_arc_get_value(ui_ouputLevelArc);
-                        codec_set_speaker_vol(val);
+                } else if (button_event->pin == BTN_LEFT_PIN) {
+                    UNPRESS(ui_lineLevelArc);
+                }
+
+            } else if (cur_obj == ui_ouputLevelArc) {
+                if (button_event->pin == BTN_ENC_PIN) {
+                    if (IS_PRESSED(ui_ouputLevelArc)) {
+                        UNPRESS(ui_ouputLevelArc);
+                        PRESS (ui_lineLevelArc);
+                        cur_obj = ui_lineLevelArc;
+                    } else {
+                        PRESS(ui_ouputLevelArc);
+                    }
+                } else if (button_event->pin == BTN_LEFT_PIN) {
+                    UNPRESS(ui_ouputLevelArc);
+                }
+            }  else if (cur_obj == ui_hp_spk_switch) {
+                if (button_event->pin == BTN_ENC_PIN) {
+                    need_codec_upd = true;
+                    if (IS_CHECKED(ui_hp_spk_switch)) {
+                        UNCHECK_OBJ(ui_hp_spk_switch);
+                        codec_set_speaker_vol(0);
+                    } else {
+                        CHECK_OBJ(ui_hp_spk_switch);
                         codec_set_hp_vol(0);
                     }
                 }
             }
-        } //if (objects[i_focused] != NULL)
+        }
+    }
 
-    } // if button event
+    char s [10] = "";
+    float db = 0;
 
+    if (line_out_arc_val != lv_arc_get_value(ui_lineLevelArc) || need_codec_upd){
+        db = codec_set_line_out_vol(line_out_arc_val);
+        sprintf(s, "%.1f",db);
+        lv_label_set_text(ui_line_level_value,s);
+        lv_arc_set_value(ui_lineLevelArc, line_out_arc_val);
+
+
+    }
+
+    if (monitor_arc_val != lv_arc_get_value(ui_ouputLevelArc) || need_codec_upd) {
+        if (IS_CHECKED(ui_hp_spk_switch)) {
+            db = codec_set_speaker_vol(monitor_arc_val);
+        } else {
+            db = codec_set_hp_vol(monitor_arc_val);
+        }
+        sprintf(s, "%.1f",db);
+        lv_label_set_text(ui_mixer_arc_value, s);
+        lv_arc_set_value(ui_ouputLevelArc, monitor_arc_val);
+    }
+
+    if (checkEscapeButtonEvent(button_event)) {
+        if (cur_obj != NULL) {
+            UNFOCUS(cur_obj);
+            UNPRESS(cur_obj);
+        }
+    }
+
+
+    need_codec_upd = 0;
     // update vu bar from wav data
     //
     uint32_t val = 0;
@@ -711,9 +979,104 @@ void ui_updateAcceptDeclineScreen (int encoder_delta, button_t* button_event){
 }
 
 void ui_updateOptionsScreen (int encoder_delta, button_t* button_event){
+    static lv_obj_t * cur_obj = NULL;
+    static int i_obj_focused = 0;
+    const int n_objects  = 6;
 
+    if (encoder_delta) {
+        if (cur_obj != NULL) {
+            if (cur_obj == ui_brightness_slider && IS_PRESSED(cur_obj)) {
+                incrementObj(SLIDER, ui_brightness_slider, encoder_delta);
+                set_pwm_backlight (lv_slider_get_value(ui_brightness_slider));
+                return;
+            }
+        }
+
+        i_obj_focused = encoderCalculatePosition(encoder_delta, i_obj_focused, 0, n_objects);
+        switch (i_obj_focused) {
+            case 0:
+                cur_obj = NULL;
+                break;
+            case 1:
+                cur_obj = ui_phantomSwitch;
+                break;
+            case 2:
+                cur_obj = ui_ALCswitch;
+                break;
+            case 3:
+                cur_obj = ui_attenEnableSwitch;
+                break;
+            case 4:
+                cur_obj = ui_xlr_swap_switch;
+                break;
+            case 5:
+                cur_obj = ui_boostEnableSwitch;
+                break;
+            case 6:
+                cur_obj = ui_brightness_slider;
+                break;
+            default:
+                break;
+        }
+        if (cur_obj != NULL) {
+            FOCUS(cur_obj);
+        }
+    }
+
+    if (checkEscapeButtonEvent(button_event)) {}
+
+    if (button_event != NULL) {
+        if (cur_obj == ui_brightness_slider) {
+            if (button_event->pin == BTN_ENC_PIN) {
+                PRESS(ui_brightness_slider);
+            } else if (button_event->pin == BTN_LEFT_PIN) {
+                UNPRESS(ui_brightness_slider);
+            }
+            return;
+        }
+        if (IS_CHECKED(cur_obj)) {
+            UNCHECK_OBJ(cur_obj);
+        } else {
+            CHECK_OBJ(cur_obj);
+        }
+
+        bool state = IS_CHECKED(cur_obj);
+
+        switch (i_obj_focused) {
+            case 0:
+                // NULL;
+                break;
+            case 1:
+                //ui_phantomSwitch;
+                enable_phantom(state);
+                break;
+            case 2:
+                //ui_ALCswitch;
+                codec_enable_alc(state);
+                break;
+            case 3:
+                //ui_attenEnableSwitch;
+                enable_atten(state);
+                break;
+            case 4:
+                //ui_xlr_swap_switch;
+                enable_xlr_swap(state);
+                break;
+            case 5:
+                //ui_boostEnableSwitch;
+                codec_enable_line_boost(state);
+                break;
+            case 6:
+                //ui_brightness_slider;
+                break;
+            default:
+                break;
+        }
+    }
 }
 
-void ui_updateCableTestScreen (int encoder_delta, button_t* button_event){
+void ui_updateCableTestScreen (int encoder_delta, button_t* button_event) {
+
+    if (checkEscapeButtonEvent(button_event)) {}
 
 }

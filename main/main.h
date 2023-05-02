@@ -12,11 +12,21 @@
 #include "esp_log.h"
 
 enum { // enum with signals from UI to audio tasks
-    PLAYER_STOP=1,
-    PLAYER_PLAY,
+
+    PLAYER_PLAY=1,
+
     RECORD_START,
-    RECORD_STOP
+
+    MONITOR_START,
+
+    WAVEGEN_START,
+
+    CABLE_TEST_START,
+
+    AUDIO_STOP
 };
+
+#define FREQ_NOTIFY_MASK 0xFFFF0000
 
 void set_pwm_backlight (uint8_t percent);
 

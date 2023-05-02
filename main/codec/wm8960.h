@@ -17,6 +17,7 @@
 #include <string.h>
 
 #define WM8960_ADDRESS 0x1A //AUDIO CODEC ADDRESS
+#define GPIO_EXPANDER_ADDR 0x18
 #define SPK_VOL_DEFAULT (0)
 #define HP_LINE_VOL_DEFAULT (90)
 #define DAC_VOL_DEFAULT (100)
@@ -43,7 +44,19 @@ void file_write_task(void *args);
 
 float codec_set_speaker_vol (uint8_t percent);
 float codec_set_hp_vol (uint8_t percent);
+float codec_set_line_out_vol (uint8_t percent);
 float codec_set_dac_vol (uint8_t percent);
+float codec_set_line_in_gain(uint8_t percent);
+float codec_set_mic_gain(uint8_t percent);
+float codec_set_alc_max (uint8_t percent);
+
+void enable_phantom (bool state);
+void codec_enable_alc (bool state);
+void enable_atten (bool state);
+void enable_xlr_swap (bool state);
+void codec_enable_line_boost (bool state);
+void codec_enable_mic_boost (bool state);
+void gpio_expander_init (void);
 
 enum {
     R0_LEFT_INPUT_VOLUME_ADR,

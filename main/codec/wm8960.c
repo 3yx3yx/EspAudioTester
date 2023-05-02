@@ -73,13 +73,23 @@ esp_err_t wm8960_writeReg(uint8_t reg, uint16_t dat) {
     uint8_t I2C_Data[2];
     I2C_Data[0] = (reg<<1)|((uint8_t)((dat>>8)&0x0001));  //RegAddr
     I2C_Data[1] = (uint8_t)(dat&0x00FF);                  //RegValue
+    esp_err_t ret = 0;
 
-    esp_err_t ret =
-            i2c_master_write_to_device(I2C_NUM_0, WM8960_ADDRESS, I2C_Data, 2, pdMS_TO_TICKS(100));
+    uint8_t cnt = 0;
 
-    vTaskDelay(pdMS_TO_TICKS(15));
+    do {
+        ret = i2c_master_write_to_device(I2C_NUM_0, WM8960_ADDRESS, I2C_Data, 2, pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(30));
 
-    printf("i2c reg=%d ret = %d data0="BYTE_TO_BINARY_PATTERN" data 1="BYTE_TO_BINARY_PATTERN"\n",reg, ret, BYTE_TO_BINARY(I2C_Data[0]), BYTE_TO_BINARY(I2C_Data[1]));
+        printf("i2c reg=%d ret = %d data0="BYTE_TO_BINARY_PATTERN
+            " data 1="BYTE_TO_BINARY_PATTERN"\n",reg, ret,
+            BYTE_TO_BINARY(I2C_Data[0]), BYTE_TO_BINARY(I2C_Data[1]));
+
+        ++cnt;
+
+    } while (ret != ESP_OK && cnt < 10);
+
+
     return ret;
 }
 
@@ -94,11 +104,7 @@ void i2s_task(void *args) {
     i2c_init();
     wm8960Init();
     i2s_init();
-
-//    for (int i=0; i<SAMPLE_PER_CYCLE*2; i+=2){
-//         samples[i] = sin(2.00*PI*(double)i/((double)SAMPLE_PER_CYCLE*2.00))*10000.0f;
-//        samples[i+1] = samples[i];
-//    }
+    gpio_expander_init ();
 
     esp_err_t ret = ESP_OK;
     size_t bytes_written_now = 0;
@@ -106,6 +112,7 @@ void i2s_task(void *args) {
     uint32_t notif = 0;
     uint8_t idx_max = 0;
 
+    vTaskSuspend(i2s_task_handle);
 
     while (1) {
 
@@ -132,6 +139,7 @@ void i2s_task(void *args) {
 
 
 extern TaskHandle_t file_task_handle;
+extern QueueHandle_t freq_queue;
 
 void wav_task(void *args) {
 
@@ -145,10 +153,11 @@ void wav_task(void *args) {
     uint8_t i2s_last_idx = 0;
 
 
+
     while (1) {
 
         xTaskNotifyWait(0, ULONG_MAX, &notif, portMAX_DELAY);
-        //printf("notif %d\n", notif);
+
         if ((notif & ui_msg_mask) == PLAYER_PLAY || restart) {
             if (restart) printf("RESTART\n");
             restart = true;
@@ -164,9 +173,10 @@ void wav_task(void *args) {
             do {
                 xTaskNotifyWait(0, ULONG_MAX, &notif,
                                 portMAX_DELAY); // wait if some buffer was sent to i2s or other messages
-                if ((notif & ui_msg_mask) == PLAYER_STOP) {
+                if ((notif & ui_msg_mask) == AUDIO_STOP) {
                     printf("wav stopped from gui\n");
                     restart = false;
+                    vTaskSuspend(i2s_task_handle);
                     break; // stop the file reading
                 } else if ((notif & i2s_msg_mask)) { // if msg from i2s task
 
@@ -208,8 +218,9 @@ void wav_task(void *args) {
                     samples[i][j] = 0;
                 }
             }
-        } else if ((notif & ui_msg_mask) == RECORD_START) {
+        } else if ((notif & ui_msg_mask) == RECORD_START || (notif & ui_msg_mask) == MONITOR_START) {
 
+            bool monitor = ((notif & ui_msg_mask) == MONITOR_START);
             vTaskSuspend(i2s_task_handle);
 
             volatile uint16_t seconds = 0;
@@ -219,15 +230,17 @@ void wav_task(void *args) {
             size_t bytes_n = 0;
             do {
                 xTaskNotifyWait(0, ULONG_MAX, &notif, 0); //wait i2s or other messages
-                if ((notif & ui_msg_mask) == RECORD_STOP) {
+                if ((notif & ui_msg_mask) == AUDIO_STOP) {
                     printf("rec stop\n");
                     break;
                 }
                 ret = i2s_read(I2S_NUM_0, &samples[idx][0], N_FRAMES * sizeof(uint16_t), &bytes_n, 1000);
                 if (ret != ESP_OK) printf("i2s fail read\n");
 
-               // bytes_n = wav_write_n_bytes(&samples[idx][0], (N_FRAMES) * sizeof(uint16_t));
-                xTaskNotify(file_task_handle, idx, eSetValueWithOverwrite);
+                if (!monitor) {
+                    xTaskNotify(file_task_handle, idx, eSetValueWithOverwrite);
+                }
+
                 //echo
                 ret = i2s_write(I2S_NUM_0, &samples[idx][0], N_FRAMES * sizeof(uint16_t), &bytes_n, 1000);
                 if (ret != ESP_OK) printf("i2s fail wr\n");
@@ -240,6 +253,99 @@ void wav_task(void *args) {
             } while ((seconds < timeout_sec));
 
 
+        } else if ((notif & ui_msg_mask) == WAVEGEN_START || (notif & ui_msg_mask) == CABLE_TEST_START) {
+            uint16_t freq = 1000;
+            printf (" wavegen start \n");
+            double smp = 0;
+            uint16_t smp_per_cycle = SAMPLE_RATE / freq;
+            double inv_smp_per_cycle = 1.00 / smp_per_cycle;
+            uint16_t smp_cnt = 0;
+            bool cable_test = (notif & ui_msg_mask) == CABLE_TEST_START;
+            //xTaskNotifyStateClear(NULL);
+
+            if (xQueueReceive(freq_queue, &freq, portMAX_DELAY) == pdPASS) {
+                printf("freq %d\n", freq);
+                smp_per_cycle = SAMPLE_RATE / freq;
+                inv_smp_per_cycle = 1.0 / smp_per_cycle;
+            }
+
+            vTaskResume(i2s_task_handle);
+            xTaskNotify(i2s_task_handle, last_idx, eSetValueWithOverwrite);
+            do {
+
+
+                xTaskNotifyWait(0, ULONG_MAX, &notif,
+                                portMAX_DELAY); // wait if some buffer was sent to i2s or other messages
+
+                if ((notif & ui_msg_mask) == AUDIO_STOP) {
+                    printf ("wavegen stop from ui\n");
+                    vTaskSuspend(i2s_task_handle);
+                    break; // stop
+                } else if ((notif & i2s_msg_mask)) { // if msg from i2s task
+
+                    i2s_last_idx = ((notif & i2s_msg_mask) >> 8) - 1; // take last transmitted buffer index
+
+                    do { // fill the buffers until we will fill the last transmitted buffer
+
+                        ++last_idx;
+                        if (last_idx >= N_DESC) { last_idx = 0; }
+
+                        if (xQueueReceive(freq_queue, &freq, 1) == pdPASS) {
+                            printf("freq %d\n", freq);
+                            smp_per_cycle = SAMPLE_RATE / freq;
+                            inv_smp_per_cycle = 1.0 / smp_per_cycle;
+                            smp_cnt = 0;
+                        }
+
+                        for (int i = 0; i < N_FRAMES; i += 2) {
+                            smp = sin(2*PI * smp_cnt * inv_smp_per_cycle);
+                            samples[last_idx][i] = (smp+1)*(16000);
+                            samples[last_idx][i+1] = samples[last_idx][i];
+                            ++smp_cnt;
+                            if (smp_cnt == smp_per_cycle) smp_cnt = 0;
+                        }
+
+
+                    } while (last_idx != i2s_last_idx);
+
+                    //  notify the i2s task which buffer is the latest and what is the work mode
+                    xTaskNotify(i2s_task_handle, last_idx, eSetValueWithOverwrite);
+
+                }
+
+                if (cable_test) {
+
+//                    ret = i2s_read(I2S_NUM_0, &samples[buf_idx][0], N_FRAMES * sizeof(uint16_t), &bytes_n, 1000);
+//                    if (ret != ESP_OK) printf("i2s fail read\n");
+//                    double sq_sum = 0; // sample magnitude squares sum
+//                    for (int i = 0; i< N_FRAMES; i++) {
+//                        double rms_smp = (float)samples[buf_idx][i] / UINT16_MAX;
+//                        sq_sum += rms_smp * rms_smp;
+//                    }
+//                    double rms = sqrt(sq_sum / N_FRAMES);
+//
+//                    printf("RMS %f\n", rms);
+//
+//                    const float error_rate = 0.1f;
+//                    const float target = 0.707f;
+//                    if ((rms < (target + error_rate)) && (rms > (target - error_rate))) {
+//
+//                    }
+
+                }
+
+                portYIELD();
+
+            }while(1) ;
+
+            i2s_zero_dma_buffer(I2S_NUM_0);
+            for (int i = 0; i < N_DESC; i++) {
+                for (int j = 0; j < N_FRAMES; j++) {
+                    samples[i][j] = 0;
+                }
+            }
+        } else {
+            printf("notif %d\n", notif);
         }
 
         portYIELD();
@@ -286,10 +392,7 @@ float codec_set_speaker_vol (uint8_t percent) {
 
     reg = (1<<8) | (1<<7) | (vol);
     wm8960_writeReg(R40_LOUT2_VOLUME, reg);
-    vTaskDelay(10);
     wm8960_writeReg(R41_ROUT2_VOLUME, reg);
-    vTaskDelay(10);
-
     db = roundf(db);
     return db;
 }
@@ -371,15 +474,8 @@ float codec_set_line_out_vol (uint8_t percent) {
     }// 0 = mute
 
     vol &= vol_max;
-//    R2_LOUT1_VOLUME_t lout1Volume = {
-//            .OUT1VU = 1, // write 1 to update headphone vol
-//            .LO1ZC = 1, // update on zero cross
-//            .LOUT1VOL = vol //127 max=+6db, 0110000=-73db, 0 = mute, 1db steps
-//    };
-//    reg = *(uint16_t *) &lout1Volume;
     reg = (1<<8) | (1<<7) | (vol);
-//    wm8960_writeReg(R2_LOUT1_VOLUME_ADR, reg);
-//    vTaskDelay(10);
+
     wm8960_writeReg(R3_ROUT1_VOLUME_ADR, reg);
     vTaskDelay(10);
 
@@ -388,74 +484,405 @@ float codec_set_line_out_vol (uint8_t percent) {
 }
 
 float codec_set_mic_gain (uint8_t percent) {
+
     uint16_t reg = 0;
     const uint16_t vol_max = 0b111111;
     const uint16_t vol_min = 0b00;
-    const float max_db = 6.00f;
-    const float min_db = -73.0f;
+    const float max_db = 30.00f;
+    const float min_db = -17.25f;
     float db = ((max_db - min_db)/100)*(percent) + min_db;
 
     uint16_t vol = 0;
     if (percent != 0) {
         vol = (uint16_t)(((float)(vol_max - vol_min) / 100.0f) * (percent) + vol_min);
     }// 0 = mute
-
     vol &= vol_max;
-//    R2_LOUT1_VOLUME_t lout1Volume = {
-//            .OUT1VU = 1, // write 1 to update headphone vol
-//            .LO1ZC = 1, // update on zero cross
-//            .LOUT1VOL = vol //127 max=+6db, 0110000=-73db, 0 = mute, 1db steps
+
+//    R1_RIGHT_INPUT_VOLUME_t rightInputVolume = {
+//            .IPUV = 1, // 1 will update gain
+//            .RINMUTE=0, // disable mute
+//            .RIZC=1, // update gain on zero cross
+//            .RINVOL=0b111000 // default 01011 = 0db 111111=+30db
 //    };
-//    reg = *(uint16_t *) &lout1Volume;
-    reg = (1<<8) | (1<<7) | (vol);
-    wm8960_writeReg(R2_LOUT1_VOLUME_ADR, reg);
-    vTaskDelay(10);
-//    wm8960_writeReg(R3_ROUT1_VOLUME_ADR, reg);
-//    vTaskDelay(10);
-
-
-    R0_LEFT_INPUT_VOLUME_t leftInputVolume = {
-            .IPUV = 1, // 1 will update gain
-            .LINMUTE=0, // disable mute
-            .LIZC=1, // update gain on zero cross
-            .LINVOL= 0b111000 // default 01011 = 0db 111111=+30db
-    };
-    reg = *(uint16_t *) &leftInputVolume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R0_LEFT_INPUT_VOLUME_ADR, reg));
-
-    R1_RIGHT_INPUT_VOLUME_t rightInputVolume = {
-            .IPUV = 1, // 1 will update gain
-            .RINMUTE=0, // disable mute
-            .RIZC=1, // update gain on zero cross
-            .RINVOL=0b111000 // default 01011 = 0db 111111=+30db
-    };
-    reg = *(uint16_t *) &rightInputVolume;
-    ESP_ERROR_CHECK(wm8960_writeReg(R1_RIGHT_INPUT_VOLUME_ADR, reg));
-
-    R32_ADCL_SIGNAL_PATH_t adclSignalPath = {
-            .LMIC2B = 1, //connect amp out to mixer
-            .LMICBOOST = 0b00, // 0db, 0b11=+29db see page 23
-            .LMN1 = 1, // connect amp input to LINPUT1
-            .LMP2 = 0, // LINPUT2
-            .LMP3 = 0 // LINPUT3
-            //if lmp2 == lmp3 == 0, amp + input is connected to vmid
-    };
-    reg = *(uint16_t *) &adclSignalPath;
-    ESP_ERROR_CHECK(wm8960_writeReg(R32_ADCL_SIGNAL_PATH, reg));
-
-    R33_ADCR_SIGNAL_PATH_t adcrSignalPath = {
-            .RMIC2B =1,
-            .RMICBOOST= 0b00 ,
-            .RMN1 =1,
-            .RMP2=0,
-            .RMP3=0
-    };
-    reg = *(uint16_t *) &adcrSignalPath;
-    ESP_ERROR_CHECK(wm8960_writeReg(R33_ADCR_SIGNAL_PATH, reg));
-
-
+    reg = (1<<8) | (1<<6) | (vol);
+    wm8960_writeReg(R1_RIGHT_INPUT_VOLUME_ADR, reg);
     db = roundf(db);
     return db;
+}
+
+float codec_set_line_in_gain(uint8_t percent) {
+    uint16_t reg = 0;
+    const uint16_t vol_max = 0b111111;
+    const uint16_t vol_min = 0b00;
+    const float max_db = 30.00f;
+    const float min_db = -17.25f;
+    float db = ((max_db - min_db)/100)*(percent) + min_db;
+
+    uint16_t vol = 0;
+    if (percent != 0) {
+        vol = (uint16_t)(((float)(vol_max - vol_min) / 100.0f) * (percent) + vol_min);
+    }// 0 = mute
+    vol &= vol_max;
+//    R0_LEFT_INPUT_VOLUME_t leftInputVolume = {
+//            .IPUV = 1, // 1 will update gain
+//            .LINMUTE=0, // disable mute
+//            .LIZC=1, // update gain on zero cross
+//            .LINVOL= 0b111000 // default 01011 = 0db 111111=+30db
+//    };
+    reg = (1<<8) | (1<<6) | (vol);
+    (wm8960_writeReg(R0_LEFT_INPUT_VOLUME_ADR, reg));
+    db = roundf(db);
+    return db;
+}
+
+void codec_enable_mic_boost (bool state) {
+    uint16_t reg = 0;
+    if (state) {
+        R33_ADCR_SIGNAL_PATH_t adcrSignalPath = {
+                .RMIC2B =1,
+                .RMICBOOST= 0b10 ,
+                .RMN1 =1,
+                .RMP2=0,
+                .RMP3=0
+        };
+        reg = *(uint16_t *) &adcrSignalPath;
+        ESP_ERROR_CHECK(wm8960_writeReg(R33_ADCR_SIGNAL_PATH, reg));
+    } else {
+        R33_ADCR_SIGNAL_PATH_t adcrSignalPath = {
+                .RMIC2B =1,
+                .RMICBOOST= 0b00 ,
+                .RMN1 =1,
+                .RMP2=0,
+                .RMP3=0
+        };
+        reg = *(uint16_t *) &adcrSignalPath;
+        ESP_ERROR_CHECK(wm8960_writeReg(R33_ADCR_SIGNAL_PATH, reg));
+    }
+}
+
+void codec_enable_line_boost (bool state) {
+    uint16_t  reg = 0;
+    if (state) {
+        R32_ADCL_SIGNAL_PATH_t adclSignalPath = {
+                .LMIC2B = 1, //connect amp out to mixer
+                .LMICBOOST = 0b10, // 0db, 0b11=+29db see page 23
+                .LMN1 = 1, // connect amp input to LINPUT1
+                .LMP2 = 0, // LINPUT2
+                .LMP3 = 0 // LINPUT3
+                //if lmp2 == lmp3 == 0, amp + input is connected to vmid
+        };
+        reg = *(uint16_t *) &adclSignalPath;
+        ESP_ERROR_CHECK(wm8960_writeReg(R32_ADCL_SIGNAL_PATH, reg));
+    } else {
+        R32_ADCL_SIGNAL_PATH_t adclSignalPath = {
+                .LMIC2B = 1, //connect amp out to mixer
+                .LMICBOOST = 0b00, // 0db, 0b11=+29db see page 23
+                .LMN1 = 1, // connect amp input to LINPUT1
+                .LMP2 = 0, // LINPUT2
+                .LMP3 = 0 // LINPUT3
+                //if lmp2 == lmp3 == 0, amp + input is connected to vmid
+        };
+        reg = *(uint16_t *) &adclSignalPath;
+        ESP_ERROR_CHECK(wm8960_writeReg(R32_ADCL_SIGNAL_PATH, reg));
+    }
+}
+
+void codec_enable_alc (bool state){
+    uint16_t reg = 0;
+    if (state) {
+        R17_ALC1_t r17Alc1 = {
+                /*
+                 *  ALC Function Select
+                    00 = ALC off (PGA gain set by register)
+                    01 = Right channel only
+                    10 = Left channel only
+                    11 = Stereo (PGA registers unused) Note:
+                    ensure that LINVOL and RINVOL settings
+                    (reg. 0 and 1) are the same before entering
+                    this mode
+                 */
+                .ALCSEL =0b01,
+                /*
+                 * Set Maximum Gain of PGA (During ALC
+                    operation)
+                    111 : +30dB
+                    110 : +24dB
+                    ....(-6dB steps)
+                    001 : -6dB
+                    000 : -12dB
+                 */
+                .MAXGAIN = 0b111,
+                /*
+                 *  ALC Target (Sets signal level at ADC input)
+                    0000 = -22.5dB FS
+                    0001 = -21.0dB FS
+                    ... (1.5dB steps)
+                    1101 = -3.0dB FS
+                    1110 = -1.5dB FS
+                    1111 = -1.5dB FS
+                 */
+                .ALCL = 0b1011
+        };
+        reg = *(uint16_t *) &r17Alc1;
+        ESP_ERROR_CHECK(wm8960_writeReg(R17_ALC1_ADR, reg));
+
+        R18_ALC2_t r18Alc2 = {
+                /*
+                 *  Set Minimum Gain of PGA (During ALC
+                    operation)
+                    000 = -17.25dB
+                    001 = -11.25dB
+                    010 = -5.25dB
+                    011 = +0.75dB
+                    100 = +6.75dB
+                    101 = +12.75dB
+                    110 = +18.75dB
+                    111 = +24.75dB
+                 */
+                .MINGAIN = 0b000,
+                /*
+                 *  ALC hold time before gain is increased.
+                    0000 = 0ms
+                    0001 = 2.67ms
+                    0010 = 5.33ms
+                    ... (time doubles with every step)
+                    1111 = 43.691s
+                 */
+                .HLD = 0b0000
+        };
+        reg = *(uint16_t *) &r18Alc2;
+        ESP_ERROR_CHECK(wm8960_writeReg(R18_ALC2_ADR, reg));
+
+        R19_ALC3_t r19Alc3 = {
+                /*
+                 *  Determines the ALC mode of operation:
+                    0 = ALC mode
+                    1 = Limiter mode
+                 */
+                .ALCMODE = 0,
+                /*
+                 *  ALC decay (gain ramp-up) time
+                    0000 = 24ms
+                    0001 = 48ms
+                    0010 = 96ms
+                    ... (time doubles with every step)
+                    1010 or higher = 24.58s
+                 */
+                .DCY = 0b0010,
+                /*
+                 * ALC attack (gain ramp-down) time
+                    0000 = 6ms
+                    0001 = 12ms
+                    0010 = 24ms
+                    ... (time doubles with every step)
+                    1010 or higher = 6.14s
+                 */
+                .ATK = 0b0010
+        };
+        reg = *(uint16_t *) &r19Alc3;
+        ESP_ERROR_CHECK(wm8960_writeReg(R19_ALC3_ADR, reg));
+
+        R20_NOISE_GATE_t noiseGate = {
+                /*
+                 *  Noise gate threshold
+                    00000 -76.5dBfs
+                    00001 -75dBfs
+                    ... 1.5 dB steps
+                    11110 -31.5dBfs
+                    11111 -30dBfs
+                 */
+                .NGTH = 0b00000,
+                .NGAT = 0 // 0 = noise gate disable
+        };
+        reg = *(uint16_t *) &noiseGate;
+        ESP_ERROR_CHECK(wm8960_writeReg(R20_NOISE_GATE_ADR, reg));
+    } else {
+        R17_ALC1_t r17Alc1 = {
+                /*
+                 *  ALC Function Select
+                    00 = ALC off (PGA gain set by register)
+                    01 = Right channel only
+                    10 = Left channel only
+                    11 = Stereo (PGA registers unused) Note:
+                    ensure that LINVOL and RINVOL settings
+                    (reg. 0 and 1) are the same before entering
+                    this mode
+                 */
+                .ALCSEL =0b00,
+                /*
+                 * Set Maximum Gain of PGA (During ALC
+                    operation)
+                    111 : +30dB
+                    110 : +24dB
+                    ....(-6dB steps)
+                    001 : -6dB
+                    000 : -12dB
+                 */
+                .MAXGAIN = 0b0000,
+                /*
+                 *  ALC Target (Sets signal level at ADC input)
+                    0000 = -22.5dB FS
+                    0001 = -21.0dB FS
+                    ... (1.5dB steps)
+                    1101 = -3.0dB FS
+                    1110 = -1.5dB FS
+                    1111 = -1.5dB FS
+                 */
+                .ALCL = 0b1011
+        };
+        reg = *(uint16_t *) &r17Alc1;
+        ESP_ERROR_CHECK(wm8960_writeReg(R17_ALC1_ADR, reg));
+
+        R18_ALC2_t r18Alc2 = {
+                /*
+                 *  Set Minimum Gain of PGA (During ALC
+                    operation)
+                    000 = -17.25dB
+                    001 = -11.25dB
+                    010 = -5.25dB
+                    011 = +0.75dB
+                    100 = +6.75dB
+                    101 = +12.75dB
+                    110 = +18.75dB
+                    111 = +24.75dB
+                 */
+                .MINGAIN = 0b000,
+                /*
+                 *  ALC hold time before gain is increased.
+                    0000 = 0ms
+                    0001 = 2.67ms
+                    0010 = 5.33ms
+                    ... (time doubles with every step)
+                    1111 = 43.691s
+                 */
+                .HLD = 0b0000
+        };
+        reg = *(uint16_t *) &r18Alc2;
+        ESP_ERROR_CHECK(wm8960_writeReg(R18_ALC2_ADR, reg));
+
+        R19_ALC3_t r19Alc3 = {
+                /*
+                 *  Determines the ALC mode of operation:
+                    0 = ALC mode
+                    1 = Limiter mode
+                 */
+                .ALCMODE = 0,
+                /*
+                 *  ALC decay (gain ramp-up) time
+                    0000 = 24ms
+                    0001 = 48ms
+                    0010 = 96ms
+                    ... (time doubles with every step)
+                    1010 or higher = 24.58s
+                 */
+                .DCY = 0b0011,
+                /*
+                 * ALC attack (gain ramp-down) time
+                    0000 = 6ms
+                    0001 = 12ms
+                    0010 = 24ms
+                    ... (time doubles with every step)
+                    1010 or higher = 6.14s
+                 */
+                .ATK = 0b0010
+        };
+        reg = *(uint16_t *) &r19Alc3;
+        ESP_ERROR_CHECK(wm8960_writeReg(R19_ALC3_ADR, reg));
+
+        R20_NOISE_GATE_t noiseGate = {
+                /*
+                 *  Noise gate threshold
+                    00000 -76.5dBfs
+                    00001 -75dBfs
+                    ... 1.5 dB steps
+                    11110 -31.5dBfs
+                    11111 -30dBfs
+                 */
+                .NGTH = 0b00000,
+                .NGAT = 0 // 0 = noise gate disable
+        };
+        reg = *(uint16_t *) &noiseGate;
+        ESP_ERROR_CHECK(wm8960_writeReg(R20_NOISE_GATE_ADR, reg));
+    }
+    // automatic level control
+
+}
+
+float codec_set_alc_max (uint8_t percent){
+return 0;
+}
+void gpio_expander_init (void) {
+    uint8_t I2C_Data[2];
+    I2C_Data[0] = 0x03; // config register
+    I2C_Data[1] = 0; // set all pins as outputs
+
+    esp_err_t ret =
+            i2c_master_write_to_device(I2C_NUM_0, GPIO_EXPANDER_ADDR, I2C_Data, 2, pdMS_TO_TICKS(100));
+
+    printf("i2c ret = %d data0="BYTE_TO_BINARY_PATTERN" data 1="BYTE_TO_BINARY_PATTERN"\n", ret, BYTE_TO_BINARY(I2C_Data[0]), BYTE_TO_BINARY(I2C_Data[1]));
+
+}
+void gpio_expander_pin_write (uint8_t pin, bool state) {
+    if (pin > 7) {
+        printf("err i2c expander");
+        return;
+    }
+
+    static uint8_t outp_reg = 0;
+    uint8_t I2C_Data[2];
+    I2C_Data[0] = 0x01; // output register
+
+    if (state) {
+        outp_reg |= 1U << pin;
+    } else {
+        outp_reg &= ~(1U << pin);
+    }
+    I2C_Data[1] = outp_reg;// set all pins as outputs
+
+    esp_err_t ret =
+            i2c_master_write_to_device(I2C_NUM_0, GPIO_EXPANDER_ADDR, I2C_Data, 2, pdMS_TO_TICKS(100));
+
+    printf("i2c ret = %d data0="BYTE_TO_BINARY_PATTERN" data 1="BYTE_TO_BINARY_PATTERN"\n", ret, BYTE_TO_BINARY(I2C_Data[0]), BYTE_TO_BINARY(I2C_Data[1]));
+
+}
+
+void enable_phantom (bool state){
+    const uint8_t phantom_en_pin = 6;
+    gpio_expander_pin_write(phantom_en_pin,state);
+}
+void enable_atten (bool state){
+    const uint8_t atten_relay_set_pin = 3;
+    const uint8_t atten_relay_reset_pin = 2;
+    if (state) {
+        gpio_expander_pin_write(atten_relay_set_pin, 1);
+        vTaskDelay(300);
+        gpio_expander_pin_write(atten_relay_set_pin, 0);
+    } else {
+        gpio_expander_pin_write(atten_relay_reset_pin, 1);
+        vTaskDelay(300);
+        gpio_expander_pin_write(atten_relay_reset_pin, 0);
+    }
+}
+void enable_xlr_swap (bool state){
+    const uint8_t xlr_relay_1_set_pin = 1;
+    const uint8_t xlr_relay_1_reset_pin = 0;
+    const uint8_t xlr_relay_2_set_pin = 4;
+    const uint8_t xlr_relay_2_reset_pin = 5;
+    if (state) {
+        gpio_expander_pin_write(xlr_relay_1_set_pin, 1);
+        gpio_expander_pin_write(xlr_relay_2_set_pin, 1);
+        vTaskDelay(300);
+        gpio_expander_pin_write(xlr_relay_1_set_pin, 0);
+        gpio_expander_pin_write(xlr_relay_2_set_pin, 0);
+        gpio_expander_pin_write(7,1); // indicator
+    } else {
+        gpio_expander_pin_write(xlr_relay_1_reset_pin, 1);
+        gpio_expander_pin_write(xlr_relay_2_reset_pin, 1);
+        vTaskDelay(300);
+        gpio_expander_pin_write(xlr_relay_1_reset_pin, 0);
+        gpio_expander_pin_write(xlr_relay_2_reset_pin, 0);
+        gpio_expander_pin_write(7,0);
+    }
 }
 
 void wm8960Init() {
@@ -607,11 +1034,17 @@ void wm8960Init() {
     reg = *(uint16_t *) &clocking2;
     ESP_ERROR_CHECK(wm8960_writeReg(R8_CLOCKING_2_ADR, reg));
 
-    // input amplifiers
 
 
+    codec_enable_alc(true);
+    codec_enable_mic_boost(true);
+    codec_enable_line_boost(false);
     codec_set_hp_vol(HP_LINE_VOL_DEFAULT);
     codec_set_line_out_vol(HP_LINE_VOL_DEFAULT);
+    codec_set_speaker_vol(SPK_VOL_DEFAULT);
+    codec_set_dac_vol(DAC_VOL_DEFAULT);
+    codec_set_line_in_gain(50);
+    codec_set_mic_gain(50);
 
     R5_ADC_DAC_CONTROL_CTR1_t adcDacControlCtr1 = {
             .DACDIV2 = 0, // dac attenuator -6db 0=disable
@@ -693,8 +1126,6 @@ void wm8960Init() {
     reg = *(uint16_t *) &r9AudioInterface;
     ESP_ERROR_CHECK(wm8960_writeReg(R9_AUDIO_INTERFACE_ADR, reg));
 
-    codec_set_dac_vol(DAC_VOL_DEFAULT);
-
     R16_3D_CONTROL_t r163DControl = {
             .D3DEPTH = 0b1111, // 3d effect 0b1111= 100% 3d effect
             .D3EN = 0, //0=disabled
@@ -704,113 +1135,7 @@ void wm8960Init() {
     reg = *(uint16_t *) &r163DControl;
     //ESP_ERROR_CHECK(wm8960_writeReg(R16_3D_CONTROL_ADR, reg));
 
-    // automatic level control
-    R17_ALC1_t r17Alc1 = {
-            /*
-             *  ALC Function Select
-                00 = ALC off (PGA gain set by register)
-                01 = Right channel only
-                10 = Left channel only
-                11 = Stereo (PGA registers unused) Note:
-                ensure that LINVOL and RINVOL settings
-                (reg. 0 and 1) are the same before entering
-                this mode
-             */
-            .ALCSEL =0b00,
-            /*
-             * Set Maximum Gain of PGA (During ALC
-                operation)
-                111 : +30dB
-                110 : +24dB
-                ....(-6dB steps)
-                001 : -6dB
-                000 : -12dB
-             */
-            .MAXGAIN = 0b0000,
-            /*
-             *  ALC Target (Sets signal level at ADC input)
-                0000 = -22.5dB FS
-                0001 = -21.0dB FS
-                ... (1.5dB steps)
-                1101 = -3.0dB FS
-                1110 = -1.5dB FS
-                1111 = -1.5dB FS
-             */
-            .ALCL = 0b1011
-    };
-    reg = *(uint16_t *) &r17Alc1;
-    //ESP_ERROR_CHECK(wm8960_writeReg(R17_ALC1_ADR, reg));
 
-    R18_ALC2_t r18Alc2 = {
-            /*
-             *  Set Minimum Gain of PGA (During ALC
-                operation)
-                000 = -17.25dB
-                001 = -11.25dB
-                010 = -5.25dB
-                011 = +0.75dB
-                100 = +6.75dB
-                101 = +12.75dB
-                110 = +18.75dB
-                111 = +24.75dB
-             */
-            .MINGAIN = 0b000,
-            /*
-             *  ALC hold time before gain is increased.
-                0000 = 0ms
-                0001 = 2.67ms
-                0010 = 5.33ms
-                ... (time doubles with every step)
-                1111 = 43.691s
-             */
-            .HLD = 0b0000
-    };
-    reg = *(uint16_t *) &r18Alc2;
-    //ESP_ERROR_CHECK(wm8960_writeReg(R18_ALC2_ADR, reg));
-
-    R19_ALC3_t r19Alc3 = {
-            /*
-             *  Determines the ALC mode of operation:
-                0 = ALC mode
-                1 = Limiter mode
-             */
-            .ALCMODE = 0,
-            /*
-             *  ALC decay (gain ramp-up) time
-                0000 = 24ms
-                0001 = 48ms
-                0010 = 96ms
-                ... (time doubles with every step)
-                1010 or higher = 24.58s
-             */
-            .DCY = 0b0011,
-            /*
-             * ALC attack (gain ramp-down) time
-                0000 = 6ms
-                0001 = 12ms
-                0010 = 24ms
-                ... (time doubles with every step)
-                1010 or higher = 6.14s
-             */
-            .ATK = 0b0010
-    };
-    reg = *(uint16_t *) &r19Alc3;
-    //ESP_ERROR_CHECK(wm8960_writeReg(R19_ALC3_ADR, reg));
-
-    R20_NOISE_GATE_t noiseGate = {
-            /*
-             *  Noise gate threshold
-                00000 -76.5dBfs
-                00001 -75dBfs
-                ... 1.5 dB steps
-                11110 -31.5dBfs
-                11111 -30dBfs
-             */
-            .NGTH = 0b00000,
-            .NGAT = 0 // 0 = noise gate disable
-    };
-    reg = *(uint16_t *) &noiseGate;
-    //ESP_ERROR_CHECK(wm8960_writeReg(R20_NOISE_GATE_ADR, reg));
 
     // ADC VOLUME
     R21_LEFT_ADC_VOLUME_t leftAdcVolume = {
@@ -838,7 +1163,7 @@ void wm8960Init() {
     R23_ADDITIONAL_CONTROL_1_t additionalControl1 = {
             .TSDEN = 1, // thermal shutdown enabled
             .VSEL = 0b11, // analog bias 11 = default for 3.3v
-            .DMONOMIX = 0, // 1= MONO,0=STEREO
+            .DMONOMIX = 1, // 1= MONO,0=STEREO
             /*
              *  ADC Data Output Select
                 00: left data = left ADC; right data =right ADC
@@ -933,7 +1258,7 @@ void wm8960Init() {
     reg = *(uint16_t *) &r39MonoOutMix2;
     ESP_ERROR_CHECK(wm8960_writeReg(R39_MONO_OUT_MIX_2, reg));
 
-    codec_set_speaker_vol(SPK_VOL_DEFAULT);
+
 
     R42_MONOOUT_VOLUME_t r42MonooutVolume = {
             .MOUTVOL = 1 // mono out vol 1=-6db 0=0db
