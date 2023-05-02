@@ -38,7 +38,7 @@ bool started = 0;
 static uint8_t input_gain_slider_val = 50;
 static uint8_t line_out_arc_val = HP_LINE_VOL_DEFAULT;
 static uint8_t monitor_arc_val = HP_LINE_VOL_DEFAULT;
-static uint8_t wave_gen_slider_val = HP_LINE_VOL_DEFAULT;
+static uint8_t wave_gen_slider_val = 30;
 static uint8_t wave_gen_freq_arc_val = 50;
 
 void changeScreen (lv_obj_t* screen){
@@ -489,9 +489,10 @@ void ui_updateMixerScreen(int encoder_delta, button_t *button_event) {
                             //mute spk
                             codec_set_speaker_vol(0);
                         }
-                        codec_set_line_in_gain(0);
+                        codec_mute_line();
+
                     } else {
-                        codec_set_mic_gain(0);
+                        codec_mute_mic();
                         CHECK_OBJ(ui_mic_line_switch);
                     }
                 }
@@ -506,7 +507,7 @@ void ui_updateMixerScreen(int encoder_delta, button_t *button_event) {
                         codec_set_hp_vol(0);
                         if (!IS_CHECKED(ui_mic_line_switch)) {
                             CHECK_OBJ(ui_mic_line_switch);
-                            codec_set_mic_gain(0);
+                            codec_mute_mic();
                         }
                     }
                 }
@@ -526,12 +527,8 @@ void ui_updateMixerScreen(int encoder_delta, button_t *button_event) {
                 db += 20;
             }
         } else {
-            // db = codec_set_mic_gain(input_gain_slider_val);
-            if (IS_CHECKED(ui_ALCswitch)) {
-                db = codec_set_alc_max(input_gain_slider_val);
-            } else {
-                db = codec_set_mic_gain(input_gain_slider_val);
-            }
+            db = codec_set_mic_gain(input_gain_slider_val);
+            db+=20;
         }
         sprintf(s, "%.1f",db);
         lv_label_set_text(ui_mixer_db_val,s);
@@ -981,7 +978,7 @@ void ui_updateAcceptDeclineScreen (int encoder_delta, button_t* button_event){
 void ui_updateOptionsScreen (int encoder_delta, button_t* button_event){
     static lv_obj_t * cur_obj = NULL;
     static int i_obj_focused = 0;
-    const int n_objects  = 6;
+    const int n_objects  = 5;
 
     if (encoder_delta) {
         if (cur_obj != NULL) {
@@ -989,6 +986,26 @@ void ui_updateOptionsScreen (int encoder_delta, button_t* button_event){
                 incrementObj(SLIDER, ui_brightness_slider, encoder_delta);
                 set_pwm_backlight (lv_slider_get_value(ui_brightness_slider));
                 return;
+            } else {
+                UNFOCUS(cur_obj);
+                switch (i_obj_focused) {
+                    case 1:
+                        UNFOCUS(ui_labelPhantom);
+                        break;
+                    case 2:
+                        UNFOCUS(ui_attenEnableLabel);
+                        cur_obj = ui_attenEnableSwitch;
+                        break;
+                    case 3:
+                        UNFOCUS(ui_Labelxlrswap);
+                        cur_obj = ui_xlr_swap_switch;
+                        break;
+                    case 4:
+                        UNFOCUS(ui_boostEnableLabel);
+                        break;
+                    default:
+                        break;
+                }
             }
         }
 
@@ -999,20 +1016,21 @@ void ui_updateOptionsScreen (int encoder_delta, button_t* button_event){
                 break;
             case 1:
                 cur_obj = ui_phantomSwitch;
+                FOCUS(ui_labelPhantom);
                 break;
             case 2:
-                cur_obj = ui_ALCswitch;
-                break;
-            case 3:
+                FOCUS(ui_attenEnableLabel);
                 cur_obj = ui_attenEnableSwitch;
                 break;
-            case 4:
+            case 3:
+                FOCUS(ui_Labelxlrswap);
                 cur_obj = ui_xlr_swap_switch;
                 break;
-            case 5:
+            case 4:
+                FOCUS(ui_boostEnableLabel);
                 cur_obj = ui_boostEnableSwitch;
                 break;
-            case 6:
+            case 5:
                 cur_obj = ui_brightness_slider;
                 break;
             default:
@@ -1034,43 +1052,39 @@ void ui_updateOptionsScreen (int encoder_delta, button_t* button_event){
             }
             return;
         }
-        if (IS_CHECKED(cur_obj)) {
-            UNCHECK_OBJ(cur_obj);
-        } else {
-            CHECK_OBJ(cur_obj);
-        }
+        if (button_event->pin == BTN_ENC_PIN && cur_obj != NULL) {
 
-        bool state = IS_CHECKED(cur_obj);
+            if (IS_CHECKED(cur_obj)) {
+                UNCHECK_OBJ(cur_obj);
+            } else {
+                CHECK_OBJ(cur_obj);
+            }
 
-        switch (i_obj_focused) {
-            case 0:
-                // NULL;
-                break;
-            case 1:
-                //ui_phantomSwitch;
-                enable_phantom(state);
-                break;
-            case 2:
-                //ui_ALCswitch;
-                codec_enable_alc(state);
-                break;
-            case 3:
-                //ui_attenEnableSwitch;
-                enable_atten(state);
-                break;
-            case 4:
-                //ui_xlr_swap_switch;
-                enable_xlr_swap(state);
-                break;
-            case 5:
-                //ui_boostEnableSwitch;
-                codec_enable_line_boost(state);
-                break;
-            case 6:
-                //ui_brightness_slider;
-                break;
-            default:
-                break;
+            bool state = IS_CHECKED(cur_obj);
+
+            switch (i_obj_focused) {
+                case 0:
+                    break;
+                case 1:
+                    //ui_phantomSwitch;
+                    enable_phantom(state);
+                    break;
+                case 2:
+                    //ui_attenEnableSwitch;
+                    enable_atten(state);
+                    break;
+                case 3:
+                    //ui_xlr_swap_switch;
+                    enable_xlr_swap(state);
+                    break;
+                case 4:
+                    //ui_boostEnableSwitch;
+                    codec_enable_line_boost(state);
+                    break;
+                default:
+                    break;
+            }
+
         }
     }
 }

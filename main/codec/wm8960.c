@@ -345,9 +345,10 @@ void wav_task(void *args) {
                 }
             }
         } else {
+
             printf("notif %d\n", notif);
         }
-
+        
         portYIELD();
     }
 }
@@ -535,6 +536,19 @@ float codec_set_line_in_gain(uint8_t percent) {
     return db;
 }
 
+void codec_mute_mic(){
+    //    R1_RIGHT_INPUT_VOLUME_t rightInputVolume = {
+//            .IPUV = 1, // 1 will update gain
+//            .RINMUTE=0, // disable mute
+//            .RIZC=1, // update gain on zero cross
+//            .RINVOL=0b111000 // default 01011 = 0db 111111=+30db
+    uint16_t     reg = (1<<8) | (1<<6) | (1<<7);
+    wm8960_writeReg(R1_RIGHT_INPUT_VOLUME_ADR, reg);
+}
+void codec_mute_line(){
+    uint16_t     reg = (1<<8) | (1<<6) | (1<<7);
+    wm8960_writeReg(R0_LEFT_INPUT_VOLUME_ADR, reg);
+}
 void codec_enable_mic_boost (bool state) {
     uint16_t reg = 0;
     if (state) {
@@ -808,9 +822,6 @@ void codec_enable_alc (bool state){
 
 }
 
-float codec_set_alc_max (uint8_t percent){
-return 0;
-}
 void gpio_expander_init (void) {
     uint8_t I2C_Data[2];
     I2C_Data[0] = 0x03; // config register
@@ -1036,7 +1047,7 @@ void wm8960Init() {
 
 
 
-    codec_enable_alc(true);
+    codec_enable_alc(false);
     codec_enable_mic_boost(true);
     codec_enable_line_boost(false);
     codec_set_hp_vol(HP_LINE_VOL_DEFAULT);
@@ -1044,7 +1055,9 @@ void wm8960Init() {
     codec_set_speaker_vol(SPK_VOL_DEFAULT);
     codec_set_dac_vol(DAC_VOL_DEFAULT);
     codec_set_line_in_gain(50);
-    codec_set_mic_gain(50);
+    //codec_set_mic_gain(50);
+    codec_mute_mic();
+    enable_atten(true);
 
     R5_ADC_DAC_CONTROL_CTR1_t adcDacControlCtr1 = {
             .DACDIV2 = 0, // dac attenuator -6db 0=disable

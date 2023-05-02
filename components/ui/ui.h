@@ -56,10 +56,10 @@ extern lv_obj_t * ui_saveLabel;
 extern lv_obj_t * ui_optionsScreen;
 extern lv_obj_t * ui_settingsMenu;
 extern lv_obj_t * ui_phantomSwitch;
-extern lv_obj_t * ui_ALCswitch;
+
 extern lv_obj_t * ui_attenEnableSwitch;
 extern lv_obj_t * ui_labelPhantom;
-extern lv_obj_t * ui_ALCEnableLabel;
+
 extern lv_obj_t * ui_attenEnableLabel;
 extern lv_obj_t * ui_xlr_swap_switch;
 extern lv_obj_t * ui_boostEnableSwitch;

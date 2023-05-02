@@ -19,7 +19,7 @@
 #define WM8960_ADDRESS 0x1A //AUDIO CODEC ADDRESS
 #define GPIO_EXPANDER_ADDR 0x18
 #define SPK_VOL_DEFAULT (0)
-#define HP_LINE_VOL_DEFAULT (90)
+#define HP_LINE_VOL_DEFAULT (86)
 #define DAC_VOL_DEFAULT (100)
 #define N_FRAMES (512)
 #define N_DESC (4)
@@ -48,7 +48,8 @@ float codec_set_line_out_vol (uint8_t percent);
 float codec_set_dac_vol (uint8_t percent);
 float codec_set_line_in_gain(uint8_t percent);
 float codec_set_mic_gain(uint8_t percent);
-float codec_set_alc_max (uint8_t percent);
+void codec_mute_mic();
+void codec_mute_line();
 
 void enable_phantom (bool state);
 void codec_enable_alc (bool state);

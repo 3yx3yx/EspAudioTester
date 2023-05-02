@@ -52,10 +52,8 @@ lv_obj_t * ui_saveLabel;
 lv_obj_t * ui_optionsScreen;
 lv_obj_t * ui_settingsMenu;
 lv_obj_t * ui_phantomSwitch;
-lv_obj_t * ui_ALCswitch;
 lv_obj_t * ui_attenEnableSwitch;
 lv_obj_t * ui_labelPhantom;
-lv_obj_t * ui_ALCEnableLabel;
 lv_obj_t * ui_attenEnableLabel;
 lv_obj_t * ui_xlr_swap_switch;
 lv_obj_t * ui_boostEnableSwitch;
@@ -75,7 +73,7 @@ lv_obj_t * ui_cableTestScreen_Label3;
     #error "LV_COLOR_DEPTH should be 16bit to match SquareLine Studio's settings"
 #endif
 #if LV_COLOR_16_SWAP !=0
-  //  #error "LV_COLOR_16_SWAP should be 0 to match SquareLine Studio's settings"
+   // #error "LV_COLOR_16_SWAP should be 0 to match SquareLine Studio's settings"
 #endif
 
 ///////////////////// ANIMATIONS ////////////////////
@@ -412,7 +410,7 @@ void ui_mixerMenuScreen_screen_init(void)
     lv_obj_set_x(ui_hp_spk_switch, 39);
     lv_obj_set_y(ui_hp_spk_switch, 95);
     lv_obj_set_align(ui_hp_spk_switch, LV_ALIGN_CENTER);
-    lv_obj_add_state(ui_hp_spk_switch, LV_STATE_CHECKED);       /// States
+    lv_obj_clear_state(ui_hp_spk_switch, LV_STATE_CHECKED);       /// States
     lv_obj_set_style_radius(ui_hp_spk_switch, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(ui_hp_spk_switch, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_hp_spk_switch, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -627,23 +625,11 @@ void ui_optionsScreen_screen_init(void)
     lv_obj_set_style_shadow_width(ui_phantomSwitch, 44, LV_PART_MAIN | LV_STATE_FOCUSED);
     lv_obj_set_style_shadow_spread(ui_phantomSwitch, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
 
-    ui_ALCswitch = lv_switch_create(ui_settingsMenu);
-    lv_obj_set_width(ui_ALCswitch, 50);
-    lv_obj_set_height(ui_ALCswitch, 25);
-    lv_obj_set_x(ui_ALCswitch, 62);
-    lv_obj_set_y(ui_ALCswitch, -60);
-    lv_obj_set_align(ui_ALCswitch, LV_ALIGN_CENTER);
-    lv_obj_add_state(ui_ALCswitch, LV_STATE_CHECKED);       /// States
-    lv_obj_set_style_shadow_color(ui_ALCswitch, lv_color_hex(0xE3E3E3), LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_shadow_opa(ui_ALCswitch, 255, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_shadow_width(ui_ALCswitch, 44, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_shadow_spread(ui_ALCswitch, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
-
     ui_attenEnableSwitch = lv_switch_create(ui_settingsMenu);
     lv_obj_set_width(ui_attenEnableSwitch, 50);
     lv_obj_set_height(ui_attenEnableSwitch, 25);
     lv_obj_set_x(ui_attenEnableSwitch, 62);
-    lv_obj_set_y(ui_attenEnableSwitch, -30);
+    lv_obj_set_y(ui_attenEnableSwitch, -52);
     lv_obj_set_align(ui_attenEnableSwitch, LV_ALIGN_CENTER);
     lv_obj_add_state(ui_attenEnableSwitch, LV_STATE_CHECKED);       /// States
     lv_obj_set_style_shadow_color(ui_attenEnableSwitch, lv_color_hex(0xE3E3E3), LV_PART_MAIN | LV_STATE_FOCUSED);
@@ -655,7 +641,7 @@ void ui_optionsScreen_screen_init(void)
     lv_obj_set_width(ui_labelPhantom, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_labelPhantom, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(ui_labelPhantom, -54);
-    lv_obj_set_y(ui_labelPhantom, -87);
+    lv_obj_set_y(ui_labelPhantom, -90);
     lv_obj_set_align(ui_labelPhantom, LV_ALIGN_CENTER);
     lv_label_set_text(ui_labelPhantom, "48V PHANTOM");
     lv_obj_set_style_outline_color(ui_labelPhantom, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_FOCUSED);
@@ -663,24 +649,11 @@ void ui_optionsScreen_screen_init(void)
     lv_obj_set_style_outline_width(ui_labelPhantom, 2, LV_PART_MAIN | LV_STATE_FOCUSED);
     lv_obj_set_style_outline_pad(ui_labelPhantom, 5, LV_PART_MAIN | LV_STATE_FOCUSED);
 
-    ui_ALCEnableLabel = lv_label_create(ui_settingsMenu);
-    lv_obj_set_width(ui_ALCEnableLabel, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_ALCEnableLabel, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_ALCEnableLabel, -45);
-    lv_obj_set_y(ui_ALCEnableLabel, -60);
-    lv_obj_set_align(ui_ALCEnableLabel, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_ALCEnableLabel, "mic ALC enable");
-    lv_obj_set_style_text_font(ui_ALCEnableLabel, &lv_font_montserrat_16, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_outline_color(ui_ALCEnableLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_opa(ui_ALCEnableLabel, 255, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_width(ui_ALCEnableLabel, 2, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_pad(ui_ALCEnableLabel, 4, LV_PART_MAIN | LV_STATE_FOCUSED);
-
     ui_attenEnableLabel = lv_label_create(ui_settingsMenu);
     lv_obj_set_width(ui_attenEnableLabel, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_attenEnableLabel, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_attenEnableLabel, -55);
-    lv_obj_set_y(ui_attenEnableLabel, -30);
+    lv_obj_set_x(ui_attenEnableLabel, -53);
+    lv_obj_set_y(ui_attenEnableLabel, -52);
     lv_obj_set_align(ui_attenEnableLabel, LV_ALIGN_CENTER);
     lv_label_set_text(ui_attenEnableLabel, "in -20 db pad");
     lv_obj_set_style_text_font(ui_attenEnableLabel, &lv_font_montserrat_16, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -693,7 +666,7 @@ void ui_optionsScreen_screen_init(void)
     lv_obj_set_width(ui_xlr_swap_switch, 50);
     lv_obj_set_height(ui_xlr_swap_switch, 25);
     lv_obj_set_x(ui_xlr_swap_switch, 62);
-    lv_obj_set_y(ui_xlr_swap_switch, 0);
+    lv_obj_set_y(ui_xlr_swap_switch, -15);
     lv_obj_set_align(ui_xlr_swap_switch, LV_ALIGN_CENTER);
     lv_obj_set_style_shadow_color(ui_xlr_swap_switch, lv_color_hex(0xE3E3E3), LV_PART_MAIN | LV_STATE_FOCUSED);
     lv_obj_set_style_shadow_opa(ui_xlr_swap_switch, 255, LV_PART_MAIN | LV_STATE_FOCUSED);
@@ -704,7 +677,7 @@ void ui_optionsScreen_screen_init(void)
     lv_obj_set_width(ui_boostEnableSwitch, 50);
     lv_obj_set_height(ui_boostEnableSwitch, 25);
     lv_obj_set_x(ui_boostEnableSwitch, 62);
-    lv_obj_set_y(ui_boostEnableSwitch, 29);
+    lv_obj_set_y(ui_boostEnableSwitch, 19);
     lv_obj_set_align(ui_boostEnableSwitch, LV_ALIGN_CENTER);
     lv_obj_set_style_shadow_color(ui_boostEnableSwitch, lv_color_hex(0xE3E3E3), LV_PART_MAIN | LV_STATE_FOCUSED);
     lv_obj_set_style_shadow_opa(ui_boostEnableSwitch, 255, LV_PART_MAIN | LV_STATE_FOCUSED);
@@ -744,8 +717,8 @@ void ui_optionsScreen_screen_init(void)
     ui_Labelxlrswap = lv_label_create(ui_optionsScreen);
     lv_obj_set_width(ui_Labelxlrswap, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_Labelxlrswap, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_Labelxlrswap, -50);
-    lv_obj_set_y(ui_Labelxlrswap, 0);
+    lv_obj_set_x(ui_Labelxlrswap, -48);
+    lv_obj_set_y(ui_Labelxlrswap, -15);
     lv_obj_set_align(ui_Labelxlrswap, LV_ALIGN_CENTER);
     lv_label_set_text(ui_Labelxlrswap, "XLR in-out swap");
     lv_obj_set_style_outline_color(ui_Labelxlrswap, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_FOCUSED);
@@ -765,8 +738,8 @@ void ui_optionsScreen_screen_init(void)
     ui_boostEnableLabel = lv_label_create(ui_optionsScreen);
     lv_obj_set_width(ui_boostEnableLabel, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_boostEnableLabel, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_boostEnableLabel, -45);
-    lv_obj_set_y(ui_boostEnableLabel, 28);
+    lv_obj_set_x(ui_boostEnableLabel, -44);
+    lv_obj_set_y(ui_boostEnableLabel, 19);
     lv_obj_set_align(ui_boostEnableLabel, LV_ALIGN_CENTER);
     lv_label_set_text(ui_boostEnableLabel, "input 20db boost");
     lv_obj_set_style_outline_color(ui_boostEnableLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_FOCUSED);
