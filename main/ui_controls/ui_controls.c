@@ -34,6 +34,7 @@ uint32_t track_len_sec = 0;
 uint32_t track_elapsed_sec = 0;
 extern TaskHandle_t wav_task_handle;
 bool started = 0;
+bool record_mode = false; // mixer menu context -- if true rec menu will be opened on left button click
 
 static uint8_t input_gain_slider_val = 50;
 static uint8_t line_out_arc_val = HP_LINE_VOL_DEFAULT;
@@ -105,6 +106,14 @@ static void openMixerMenu(void) {                                    //mixer
     lv_obj_clear_flag(ui_mixer_slider, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(ui_mixer_db_val, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(ui_mixer_arc_label, "monitor");
+    lv_obj_clear_flag(ui_mixer_slider, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_mixer_db_val, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_mixer_slider_func_label, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(ui_mixer_slider_func_label, "in");
+    lv_label_set_text(ui_line_out_label, "line out");
+    lv_obj_clear_flag(ui_ouputLevelArc, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_mixer_arc_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_mixer_arc_value, LV_OBJ_FLAG_HIDDEN);
 }
 
 
@@ -119,11 +128,15 @@ static void openPlayerMixerMenu(void) {                                    //mix
     lv_obj_add_flag(ui_xlr_icon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(ui_hpIcon, LV_OBJ_FLAG_HIDDEN);
 
-    //lv_obj_add_flag(ui_mixer_slider, LV_OBJ_FLAG_HIDDEN);
-    //lv_obj_add_flag(ui_mixer_db_val, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(ui_mixer_arc_label, "level");
+    lv_obj_add_flag(ui_mixer_slider, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_mixer_db_val, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_mixer_slider_func_label, LV_OBJ_FLAG_HIDDEN);
 
+    lv_label_set_text(ui_line_out_label, "line out");
 
+    lv_obj_clear_flag(ui_ouputLevelArc, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_mixer_arc_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_mixer_arc_value, LV_OBJ_FLAG_HIDDEN);
 
 
 }
@@ -139,6 +152,9 @@ static void openWaveGenMenu (void) {                                      //wave
     lv_obj_clear_flag(ui_mixer_slider, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(ui_mixer_db_val, LV_OBJ_FLAG_HIDDEN);
 
+    lv_obj_clear_flag(ui_mixer_slider, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_mixer_db_val, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_mixer_slider_func_label, LV_OBJ_FLAG_HIDDEN);
 
     lv_label_set_text(ui_line_out_label, "freq");
     lv_label_set_text(ui_mixer_slider_func_label, "out");
@@ -146,6 +162,8 @@ static void openWaveGenMenu (void) {                                      //wave
     lv_obj_add_flag(ui_mixer_arc_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(ui_mixer_arc_value, LV_OBJ_FLAG_HIDDEN);
 
+    codec_set_speaker_vol(0);
+    codec_set_hp_vol(0);
     xTaskNotify(wav_task_handle,WAVEGEN_START,eSetValueWithOverwrite);
 
 }
@@ -165,6 +183,10 @@ static void openRecMenu (void){                                       //record
     lv_chart_set_point_count(ui_chart, 100);
     lv_chart_set_type(ui_chart, LV_CHART_TYPE_BAR);
     chartSeries = lv_chart_add_series(ui_chart, lv_color_white(), LV_CHART_AXIS_PRIMARY_Y);
+
+    lv_slider_set_value(ui_timePosSlider,0,LV_ANIM_OFF);
+
+    record_mode = true; // mixer menu context -- if true rec menu will be opened on left button click
 
 }
 
@@ -247,9 +269,9 @@ static void openPlayMenu (void){                                   //play
     uint16_t smooth_buf[5] = {};
     uint8_t smooth_buf_idx=0;
     for (int i = 0; i < 100; i++) {
-        uint16_t peak = 0;
-        fread(&peak, sizeof(uint16_t), 1, f);
-        peak /= (UINT16_MAX) / 100;
+        int16_t peak = 0;
+        fread(&peak, sizeof(int16_t), 1, f);
+        peak /= (INT16_MAX) / 100;
 
         //smoothing
         smooth_buf[smooth_buf_idx] = peak;
@@ -308,6 +330,11 @@ static void openOptionsMenu (void) {
 static void openCableTestMenu (void){
     changeScreen(ui_cableTestScreen);
     currentScreenUpd = ui_updateCableTestScreen;
+    codec_mute_mic();
+    codec_set_speaker_vol(0);
+    codec_set_line_out_vol(HP_LINE_VOL_DEFAULT);
+    codec_set_line_in_gain(50);
+    xTaskNotify(wav_task_handle,CABLE_TEST_START,eSetValueWithOverwrite);
 }
 
 static bool checkEscapeButtonEvent (button_t* button_event){
@@ -330,7 +357,10 @@ void ui_updateStartScreen (int encoder_delta, button_t* button_event){
 
     if (button_event != NULL && button_event->pin == BTN_ENC_PIN) {
         switch (lv_roller_get_selected(ui_start_menu_roller)) {
-            case 0: openMixerMenu();break;
+            case 0:
+                openMixerMenu();
+                record_mode = false;
+                break;
             case 1: openTracklistMenu();break;
             case 2: openRecMenu();break;
             case 3: openWaveGenMenu();break;
@@ -343,6 +373,8 @@ void ui_updateStartScreen (int encoder_delta, button_t* button_event){
     started = false;
     xTaskNotify(wav_task_handle,AUDIO_STOP,eSetValueWithOverwrite);
     first_scr_upd = true;
+    wav_close_current();
+
 
 }
 /**
@@ -377,7 +409,6 @@ void ui_updateMixerScreen(int encoder_delta, button_t *button_event) {
     if (encoder_delta) {
         bool menu_scroll = false;
         if (cur_obj != NULL) {
-            printf ("obj_i = %d\n", i_obj_focused);
 
             if (IS_PRESSED(cur_obj)) {
                 if (cur_obj == ui_mixer_slider) {
@@ -432,15 +463,29 @@ void ui_updateMixerScreen(int encoder_delta, button_t *button_event) {
 
     if (button_event != NULL) {
 
-        if (button_event->pin == BTN_LEFT_PIN &&
-            lv_disp_get_scr_prev(NULL) == ui_recPlayScreen) { // left btn => esc to rec menu
+        if (checkEscapeButtonEvent(button_event)) {
+            xTaskNotify(wav_task_handle,AUDIO_STOP,eSetValueWithOverwrite);
+            if (cur_obj != NULL) {
+                UNFOCUS(cur_obj);
+                UNPRESS(cur_obj);
+            }
+            if (record_mode) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+                wav_delete_record();
+            }
+            return;
+        }
+
+        if (button_event->pin == BTN_LEFT_PIN && record_mode) { // left btn => esc to rec menu
             if (cur_obj != NULL) {
                 if (!IS_PRESSED(cur_obj)) {
                     openRecMenu();
+                    xTaskNotify(wav_task_handle,AUDIO_STOP,eSetValueWithOverwrite);
                     return;
                 }
             } else {
                 openRecMenu();
+                xTaskNotify(wav_task_handle,AUDIO_STOP,eSetValueWithOverwrite);
                 return;
             }
         }
@@ -528,7 +573,7 @@ void ui_updateMixerScreen(int encoder_delta, button_t *button_event) {
             }
         } else {
             db = codec_set_mic_gain(input_gain_slider_val);
-            db+=20;
+            db+=30;
         }
         sprintf(s, "%.1f",db);
         lv_label_set_text(ui_mixer_db_val,s);
@@ -558,17 +603,17 @@ void ui_updateMixerScreen(int encoder_delta, button_t *button_event) {
 
     }
 
-    if (checkEscapeButtonEvent(button_event)) {
-        if (cur_obj != NULL) {
-            UNFOCUS(cur_obj);
-            UNPRESS(cur_obj);
-        }
-    }
+
     if (need_codec_upd) xTaskNotify(wav_task_handle,MONITOR_START,eSetValueWithOverwrite);
     need_codec_upd = 0;
     // to do : update vu bar from codec data
     //
     //
+    uint32_t val = 0;
+    if ( xTaskNotifyWait(0, ULONG_MAX, &val, pdMS_TO_TICKS(10)) == pdPASS){
+        lv_slider_set_value(ui_mixer_vu_bar_slider, val, LV_ANIM_OFF);
+    }
+
 }
 
 
@@ -643,6 +688,7 @@ void ui_updateWaveGenScreen (int encoder_delta, button_t* button_event){
         sprintf(s, "%.1f",db);
         lv_label_set_text(ui_mixer_db_val,s);
         lv_slider_set_value(ui_mixer_slider, wave_gen_slider_val, LV_ANIM_OFF);
+        lv_slider_set_value(ui_mixer_vu_bar_slider, wave_gen_slider_val, LV_ANIM_OFF);
     }
 
     if (wave_gen_freq_arc_val != lv_arc_get_value(ui_lineLevelArc) || need_codec_upd) {
@@ -702,7 +748,26 @@ void ui_updateRecScreen (int encoder_delta, button_t* button_event){
     static bool rec_started = 0;
     static bool paused = 0;
 
+    if (first_scr_upd) {
+        first_scr_upd = 0;
+        rec_started = 0;
+        paused = 0;
+    }
+
+    if (!rec_started) lv_slider_set_value(ui_timePosSlider,0,LV_ANIM_OFF);
+
     if (button_event != NULL) {
+
+        if (checkEscapeButtonEvent(button_event)) {
+            // mute codec
+            //
+            xTaskNotify(wav_task_handle,AUDIO_STOP,eSetValueWithOverwrite);
+            vTaskDelay(pdMS_TO_TICKS(50));
+            //openAcceptDeclineMenu();
+            wav_delete_record();
+            return;
+        }
+
         if (button_event->pin == BTN_ENC_PIN) {
             if (!rec_started) {
                 // start recording
@@ -743,16 +808,22 @@ void ui_updateRecScreen (int encoder_delta, button_t* button_event){
             }
         }
 
-        if (checkEscapeButtonEvent(button_event)) {
-            // mute codec
-            //
-            xTaskNotify(wav_task_handle,AUDIO_STOP,eSetValueWithOverwrite);
-            vTaskDelay(pdMS_TO_TICKS(50));
-            openAcceptDeclineMenu();
+
+    }
+
+    uint32_t val = 0;
+    static uint8_t point_cnt = 0;
+    if (xTaskNotifyWait(0, ULONG_MAX, &val, pdMS_TO_TICKS(0)) == pdPASS) {
+        ++point_cnt;
+        if (point_cnt >= 100) {
+            point_cnt = 0;
         }
+        lv_slider_set_value(ui_timePosSlider, point_cnt, LV_ANIM_OFF);
     }
 
 }
+
+extern TaskHandle_t i2s_task_handle;
 
 void ui_updatePlayScreen (int encoder_delta, button_t* button_event) {
 
@@ -775,7 +846,10 @@ void ui_updatePlayScreen (int encoder_delta, button_t* button_event) {
                 char fname [255] = "";
                 get_nth_file_name(file_selected_pos,fname);
                 wav_open_file(fname);
+                xTaskNotifyStateClear(wav_task_handle);
+                vTaskResume(i2s_task_handle);
                 xTaskNotify(wav_task_handle,PLAYER_PLAY,eSetValueWithOverwrite);
+                xTaskNotify(i2s_task_handle,0xf00,eSetValueWithOverwrite);
             }else if (started && !paused) {
                 paused = true;
                 lv_img_set_src(ui_rec_play_right_button, &ui_img_play_png);
@@ -789,11 +863,21 @@ void ui_updatePlayScreen (int encoder_delta, button_t* button_event) {
             }
         }
 
+
+
         if (button_event->pin == BTN_LEFT_PIN) {
             openPlayerMixerMenu();
         }
     }
 
+    if (started && !paused) {
+        xTaskNotify(wav_task_handle,PLAYER_PLAY,eSetValueWithOverwrite);
+    }
+
+    if (first_scr_upd) {
+        xTaskNotifyStateClear(xTaskGetCurrentTaskHandle());
+        first_scr_upd = 0;
+    }
     uint32_t val = 0;
     if ( xTaskNotifyWait(0,ULONG_MAX,&val, 10) == pdTRUE) {
         increment_elapsed_time(1);
@@ -857,10 +941,19 @@ void ui_updatePlayerMixer (int encoder_delta, button_t* button_event) {
 
     }
 
+
     if (button_event != NULL) {
 
-        if (button_event->pin == BTN_LEFT_PIN &&
-            lv_disp_get_scr_prev(NULL) == ui_recPlayScreen) { // left btn => esc to rec menu
+        if (checkEscapeButtonEvent(button_event)) {
+            if (cur_obj != NULL) {
+                UNFOCUS(cur_obj);
+                UNPRESS(cur_obj);
+            }
+            return;
+        }
+
+
+        if (button_event->pin == BTN_LEFT_PIN) { // left btn => esc to rec menu
             if (cur_obj != NULL) {
                 if (!IS_PRESSED(cur_obj)) {
                     openPlayMenu();
@@ -899,15 +992,19 @@ void ui_updatePlayerMixer (int encoder_delta, button_t* button_event) {
                 } else if (button_event->pin == BTN_LEFT_PIN) {
                     UNPRESS(ui_ouputLevelArc);
                 }
-            }  else if (cur_obj == ui_hp_spk_switch) {
+            } else if (cur_obj == ui_hp_spk_switch) {
+                need_codec_upd = true;
                 if (button_event->pin == BTN_ENC_PIN) {
-                    need_codec_upd = true;
                     if (IS_CHECKED(ui_hp_spk_switch)) {
                         UNCHECK_OBJ(ui_hp_spk_switch);
                         codec_set_speaker_vol(0);
                     } else {
                         CHECK_OBJ(ui_hp_spk_switch);
                         codec_set_hp_vol(0);
+                        if (!IS_CHECKED(ui_mic_line_switch)) {
+                            CHECK_OBJ(ui_mic_line_switch);
+                            codec_mute_mic();
+                        }
                     }
                 }
             }
@@ -937,12 +1034,6 @@ void ui_updatePlayerMixer (int encoder_delta, button_t* button_event) {
         lv_arc_set_value(ui_ouputLevelArc, monitor_arc_val);
     }
 
-    if (checkEscapeButtonEvent(button_event)) {
-        if (cur_obj != NULL) {
-            UNFOCUS(cur_obj);
-            UNPRESS(cur_obj);
-        }
-    }
 
 
     need_codec_upd = 0;
@@ -950,7 +1041,6 @@ void ui_updatePlayerMixer (int encoder_delta, button_t* button_event) {
     //
     uint32_t val = 0;
     if ( xTaskNotifyWait(0,ULONG_MAX,&val, 10) == pdTRUE) {
-        val -= 100-lv_slider_get_value(ui_mixer_slider);
         lv_slider_set_value(ui_mixer_vu_bar_slider, val, LV_ANIM_OFF);
         increment_elapsed_time(1);
     }
@@ -1090,6 +1180,24 @@ void ui_updateOptionsScreen (int encoder_delta, button_t* button_event){
 }
 
 void ui_updateCableTestScreen (int encoder_delta, button_t* button_event) {
+
+    if (first_scr_upd) {
+        xTaskNotify(wav_task_handle, CABLE_TEST_START, eSetValueWithOverwrite);
+        lv_obj_add_flag(ui_OK_icon, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(ui_cableStatus, "No cable");
+    }
+    first_scr_upd = 0;
+    uint32_t notif = 0;
+    if (xTaskNotifyWait(0,ULONG_MAX, &notif, portMAX_DELAY) == pdPASS){
+        if (notif) {
+            lv_obj_clear_flag(ui_OK_icon, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(ui_cableStatus, "Ok");
+        } else {
+            lv_obj_add_flag(ui_OK_icon, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(ui_cableStatus, "No cable");
+        }
+    }
+
 
     if (checkEscapeButtonEvent(button_event)) {}
 

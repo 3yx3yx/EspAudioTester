@@ -44,7 +44,7 @@ uint8_t wav_start_record (void) {
     fname_record[0] = '\0';
     get_new_record_name(fname_record);
     if (strlen(fname_record) == 0) return 0;
-    printf("%s\n",fname_record);
+    printf("rec %s\n",fname_record);
 
     cur_file = fopen(fname_record, "a");
 
@@ -164,20 +164,32 @@ uint32_t wav_get_size (char* filename) {
 
     if (byteRate == BYTE_RATE_44100/2 && n_chan == 1 && block_align == 0x2) {
         curr_n_channels = 1;
+        i2s_set_sample_rates(I2S_NUM_0, 44100);
         printf("file is mono\n");
     } else if (byteRate == BYTE_RATE_44100 && n_chan == 0x2 && block_align == 0x4){
         curr_n_channels = 2;
+        i2s_set_sample_rates(I2S_NUM_0, 44100);
         printf("file is stereo\n");
-    } else {
+    } else if (byteRate == BYTE_RATE_48000 && n_chan == 0x2 && block_align == 0x4){
+        curr_n_channels = 2;
+        i2s_set_sample_rates(I2S_NUM_0, 48000);
+        printf("file is stereo\n");
+    }else {
         printf ("wav fmt err\n");
         return  0;
     }
 
 
     fclose(f);
+    printf ("wav size %d\n", wav_size);
     return wav_size;
 }
 
 uint8_t wav_curr_file_get_n_channels (void) {
     return curr_n_channels;
+}
+
+void wav_close_current (void){
+    if (cur_file != NULL)
+        fclose(cur_file);
 }

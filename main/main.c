@@ -92,8 +92,7 @@ void app_main(void) {
     xTaskCreatePinnedToCore(wav_task,"wavTask", 4096, NULL, 1,&wav_task_handle,1);
     xTaskCreatePinnedToCore(file_write_task,"fileTask", 4096, NULL, 1,&file_task_handle,0);
 
-
-
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -115,7 +114,6 @@ void app_main(void) {
                 button_event = NULL;
                 noInputEventCnt=0;
             }
-
             // battery measurement
             if (((xTaskGetTickCount() - last_adc_ack) > pdMS_TO_TICKS(2000))) {
                 uint8_t charge = get_battery_charge();
@@ -125,8 +123,8 @@ void app_main(void) {
                 //printf(" watermark %d \n", stackWMark);
             }
         }
-        xSemaphoreGive(xGuiSemaphore);
 
+        xSemaphoreGive(xGuiSemaphore);
 
     }
 }
@@ -198,8 +196,8 @@ static void pwm_init(void){
     ledc_timer_config_t ledc_timer = {
             .speed_mode       = LEDC_LOW_SPEED_MODE,
             .timer_num        = LEDC_TIMER_0,
-            .duty_resolution  = LEDC_TIMER_13_BIT,
-            .freq_hz          = 5000,  // Set output frequency at 5 kHz
+            .duty_resolution  = LEDC_TIMER_7_BIT,
+            .freq_hz          = 30000,  // Set output frequency at 5 kHz
             .clk_cfg          = LEDC_AUTO_CLK
     };
     ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
@@ -218,7 +216,7 @@ static void pwm_init(void){
 }
 void set_pwm_backlight (uint8_t percent){
     if (percent < 1) percent = 2;
-    uint32_t duty = (8191/100)*percent;
+    uint32_t duty = (126/100)*percent;
     ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty));
     // Update duty to apply the new value
     ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0));

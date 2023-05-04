@@ -9,6 +9,7 @@
 #define NUM_CHANNELS 2
 #define BIT_PER_SAMPLE 16
 #define BYTE_RATE_44100 (SAMPLE_RATE*NUM_CHANNELS*BIT_PER_SAMPLE/8)
+#define BYTE_RATE_48000 (48000*NUM_CHANNELS*BIT_PER_SAMPLE/8)
 
 #define MOUNT_POINT      "/sdcard"
 void mount_sdcard(void);

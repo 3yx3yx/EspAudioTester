@@ -21,10 +21,10 @@
 #define I2C_SDA (21)
 #define I2C_SCL (22)
 
-#define SAMPLE_PER_CYCLE (SAMPLE_RATE/WAVE_FREQ_HZ)
 #define BUFFERS_PER_SEC ((SAMPLE_RATE*2)/N_FRAMES)
-
+#define RMS_BUF_LEN (100)
 static uint16_t samples[N_DESC][N_FRAMES] = {};
+static uint16_t rms_buf [RMS_BUF_LEN] = {};
 
 void i2c_init(void) {
     i2c_config_t conf;
@@ -99,6 +99,7 @@ extern TaskHandle_t main_task_handle;
 const uint32_t i2s_msg_mask = 0xFF00;
 
 
+
 void i2s_task(void *args) {
 
     i2c_init();
@@ -112,12 +113,20 @@ void i2s_task(void *args) {
     uint32_t notif = 0;
     uint8_t idx_max = 0;
 
-    vTaskSuspend(i2s_task_handle);
+    //vTaskSuspend(i2s_task_handle);
 
     while (1) {
 
         if (xTaskNotifyWait(0, ULONG_MAX, &notif, 10) == pdTRUE) { // check the last updated buffer index
-            idx_max = notif & 0xFF;
+            if (notif == I2S_TASK_SUSPEND_REQUIRED) {
+                // this task cannot be suspended from another task because i2s_write function takes semaphore,
+                // so it will be blocked for other tasks
+                xTaskNotifyStateClear(xTaskGetCurrentTaskHandle());
+                vTaskSuspend(xTaskGetCurrentTaskHandle());
+                idx_max = 0;
+            } else {
+                idx_max = notif & 0xFF;
+            }
         }
 
         if (idx != idx_max) {
@@ -137,7 +146,28 @@ void i2s_task(void *args) {
     }
 }
 
+static void clear_i2s_buffers () {
+    i2s_zero_dma_buffer(I2S_NUM_0);
+    for (int i = 0; i < N_DESC; i++) {
+        for (int j = 0; j < N_FRAMES; j++) {
+            samples[i][j] = 0;
+        }
+    }
+}
 
+static double rms_calculate (void* buf, uint32_t len) {
+    double sq_sum = 0; // sample magnitude squares sum
+    int16_t* smp = (int16_t*)buf;
+
+    for (int i = 0; i< len; i++) {
+        double rms_smp = (double)(smp[i]) / INT16_MAX;
+//        rms_smp -= 0.5;
+//        rms_smp *= 2;
+        sq_sum += rms_smp * rms_smp;
+    }
+    double rms = sqrt(sq_sum / len);
+    return  rms;
+}
 extern TaskHandle_t file_task_handle;
 extern QueueHandle_t freq_queue;
 
@@ -162,12 +192,12 @@ void wav_task(void *args) {
             if (restart) printf("RESTART\n");
             restart = true;
             printf("wav task play started\n");
-
             vTaskResume(i2s_task_handle);
-
+            vTaskDelay(pdMS_TO_TICKS(100));
             for (last_idx = 0; last_idx < N_DESC; ++last_idx) { // fill the buffers before starting i2s write
                 wav_read_n_bytes(&samples[last_idx][0], (N_FRAMES) * sizeof(uint16_t));
             }
+            xTaskNotifyStateClear(i2s_task_handle);
             xTaskNotify(i2s_task_handle, last_idx - 1,
                         eSetValueWithOverwrite); // notify the i2s task which buffer is the latest
             do {
@@ -176,32 +206,36 @@ void wav_task(void *args) {
                 if ((notif & ui_msg_mask) == AUDIO_STOP) {
                     printf("wav stopped from gui\n");
                     restart = false;
-                    vTaskSuspend(i2s_task_handle);
                     break; // stop the file reading
                 } else if ((notif & i2s_msg_mask)) { // if msg from i2s task
+
+                    static double rms_sum = 0;
 
                     i2s_last_idx = ((notif & i2s_msg_mask) >> 8) - 1; // take last transmitted buffer index
 
                     do { // fill the buffers until we will fill the last transmitted buffer
-
                         ++last_idx;
                         if (last_idx >= N_DESC) { last_idx = 0; }
                         n_bytes_from_file = wav_read_n_bytes(&samples[last_idx][0], (N_FRAMES) * sizeof(uint16_t));
+
                         ++buffers_cnt;
-                        for (int i = 0; i < N_FRAMES; i++) {  // calc average sample value
-                            peak_sum += samples[last_idx][i];
-                        }
+                        double rms = rms_calculate(&samples[last_idx][0], N_FRAMES);
+                        rms_sum+=rms;
 
                     } while (last_idx != i2s_last_idx);
                     //  notify the i2s task which buffer is the latest and what is the work mode
                     xTaskNotify(i2s_task_handle, last_idx, eSetValueWithOverwrite);
                     // notify main gui task each 1 sec to upd elapsed time and send average audio amplitude
                     if (buffers_cnt >= BUFFERS_PER_SEC) {
-                        peak_sum /= N_FRAMES * buffers_cnt;
-                        float val = (float) peak_sum / UINT16_MAX;
-                        if ((val = 100 + 2 * 20 * logf(val)) < 0) val = 0;
-                        xTaskNotify(main_task_handle, val, eSetValueWithOverwrite);
-                        buffers_cnt = peak_sum = 0;
+
+                            double avg_rms = rms_sum / buffers_cnt;
+                            buffers_cnt = 0;
+                            rms_sum = 0;
+                         //   printf("\n RMS %f\n\n", avg_rms);
+
+                            uint32_t val = (avg_rms) * 320;
+                            if (val > 100) val = 100;
+                            xTaskNotify(main_task_handle, val, eSetValueWithOverwrite);
                     }
                     portYIELD();
                 }
@@ -211,25 +245,27 @@ void wav_task(void *args) {
             if (restart) {
                 wav_rewind();
             }
-            // cleanup the buffers when playback stopped
-            i2s_zero_dma_buffer(I2S_NUM_0);
-            for (int i = 0; i < N_DESC; i++) {
-                for (int j = 0; j < N_FRAMES; j++) {
-                    samples[i][j] = 0;
-                }
-            }
+
+            clear_i2s_buffers();
+
         } else if ((notif & ui_msg_mask) == RECORD_START || (notif & ui_msg_mask) == MONITOR_START) {
 
+            printf("rec start\n");
             bool monitor = ((notif & ui_msg_mask) == MONITOR_START);
-            vTaskSuspend(i2s_task_handle);
 
             volatile uint16_t seconds = 0;
-            const uint16_t timeout_sec = 3600 * 4; // 4 hours
+            const uint32_t timeout_sec = 3600 * 12; //12 hours
             uint8_t idx = 0;
             esp_err_t ret = 0;
             size_t bytes_n = 0;
+
+            xTaskNotify(i2s_task_handle, I2S_TASK_SUSPEND_REQUIRED, eSetValueWithOverwrite);
+            vTaskDelay(200);
+            i2s_set_sample_rates(I2S_NUM_0, 44100);
+
             do {
-                xTaskNotifyWait(0, ULONG_MAX, &notif, 0); //wait i2s or other messages
+                xTaskNotifyWait(0, ULONG_MAX, &notif, 0);
+
                 if ((notif & ui_msg_mask) == AUDIO_STOP) {
                     printf("rec stop\n");
                     break;
@@ -239,19 +275,41 @@ void wav_task(void *args) {
 
                 if (!monitor) {
                     xTaskNotify(file_task_handle, idx, eSetValueWithOverwrite);
+                } else {
+
                 }
 
-                //echo
                 ret = i2s_write(I2S_NUM_0, &samples[idx][0], N_FRAMES * sizeof(uint16_t), &bytes_n, 1000);
                 if (ret != ESP_OK) printf("i2s fail wr\n");
 
+                static uint16_t rms_cnt = 0;
+                const uint16_t rms_cnt_max = 38;
+                static double rms_sum = 0;
+                double rms = rms_calculate(&samples[idx][0], N_FRAMES);
+
+                rms_sum+=rms;
+                ++rms_cnt;
+
+                if (rms_cnt >= rms_cnt_max) {
+                    double avg_rms = rms_sum / rms_cnt;
+                    rms_cnt = 0;
+                    rms_sum = 0;
+                    //printf("\n RMS %f\n\n", avg_rms);
+
+                    uint32_t val = (avg_rms) * 480;
+                    if (val > 100) val = 100;
+                    xTaskNotify(main_task_handle, val, eSetValueWithOverwrite);
+
+                }
+
                 ++idx;
-                if (idx == N_DESC) idx = 0;
+                if (idx >= N_DESC) {idx = 0;}
 
                 portYIELD();
 
-            } while ((seconds < timeout_sec));
+            } while (monitor || (seconds < timeout_sec));
 
+            clear_i2s_buffers();
 
         } else if ((notif & ui_msg_mask) == WAVEGEN_START || (notif & ui_msg_mask) == CABLE_TEST_START) {
             uint16_t freq = 1000;
@@ -261,25 +319,28 @@ void wav_task(void *args) {
             double inv_smp_per_cycle = 1.00 / smp_per_cycle;
             uint16_t smp_cnt = 0;
             bool cable_test = (notif & ui_msg_mask) == CABLE_TEST_START;
-            //xTaskNotifyStateClear(NULL);
+            esp_err_t ret = 0;
+            xTaskNotifyStateClear(xTaskGetCurrentTaskHandle());
+            i2s_set_sample_rates(I2S_NUM_0, 44100);
 
-            if (xQueueReceive(freq_queue, &freq, portMAX_DELAY) == pdPASS) {
-                printf("freq %d\n", freq);
-                smp_per_cycle = SAMPLE_RATE / freq;
-                inv_smp_per_cycle = 1.0 / smp_per_cycle;
+            if (!cable_test) {
+                if (xQueueReceive(freq_queue, &freq, portMAX_DELAY) == pdPASS) {
+                    printf("freq %d\n", freq);
+                    smp_per_cycle = SAMPLE_RATE / freq;
+                    inv_smp_per_cycle = 1.0 / smp_per_cycle;
+                }
             }
 
             vTaskResume(i2s_task_handle);
             xTaskNotify(i2s_task_handle, last_idx, eSetValueWithOverwrite);
             do {
 
-
                 xTaskNotifyWait(0, ULONG_MAX, &notif,
                                 portMAX_DELAY); // wait if some buffer was sent to i2s or other messages
 
                 if ((notif & ui_msg_mask) == AUDIO_STOP) {
                     printf ("wavegen stop from ui\n");
-                    vTaskSuspend(i2s_task_handle);
+                    //vTaskSuspend(i2s_task_handle);
                     break; // stop
                 } else if ((notif & i2s_msg_mask)) { // if msg from i2s task
 
@@ -290,16 +351,20 @@ void wav_task(void *args) {
                         ++last_idx;
                         if (last_idx >= N_DESC) { last_idx = 0; }
 
-                        if (xQueueReceive(freq_queue, &freq, 1) == pdPASS) {
-                            printf("freq %d\n", freq);
-                            smp_per_cycle = SAMPLE_RATE / freq;
-                            inv_smp_per_cycle = 1.0 / smp_per_cycle;
-                            smp_cnt = 0;
+                        if (!cable_test) {
+                            if (xQueueReceive(freq_queue, &freq, 1) == pdPASS) {
+                                printf("freq %d\n", freq);
+                                smp_per_cycle = SAMPLE_RATE / freq;
+                                inv_smp_per_cycle = 1.0 / smp_per_cycle;
+                                smp_cnt = 0;
+                            }
                         }
 
                         for (int i = 0; i < N_FRAMES; i += 2) {
                             smp = sin(2*PI * smp_cnt * inv_smp_per_cycle);
-                            samples[last_idx][i] = (smp+1)*(16000);
+                            int16_t s = smp * 32000;
+                            //samples[last_idx][i] = (smp+1)*(16000);
+                            samples[last_idx][i] = *(uint16_t *)&s;
                             samples[last_idx][i+1] = samples[last_idx][i];
                             ++smp_cnt;
                             if (smp_cnt == smp_per_cycle) smp_cnt = 0;
@@ -314,23 +379,30 @@ void wav_task(void *args) {
                 }
 
                 if (cable_test) {
+                    size_t bytes_n;
+                    ret = i2s_read(I2S_NUM_0, rms_buf, RMS_BUF_LEN * sizeof(uint16_t), &bytes_n, 1000);
+                    if (ret != ESP_OK) printf("i2s fail read\n");
 
-//                    ret = i2s_read(I2S_NUM_0, &samples[buf_idx][0], N_FRAMES * sizeof(uint16_t), &bytes_n, 1000);
-//                    if (ret != ESP_OK) printf("i2s fail read\n");
-//                    double sq_sum = 0; // sample magnitude squares sum
-//                    for (int i = 0; i< N_FRAMES; i++) {
-//                        double rms_smp = (float)samples[buf_idx][i] / UINT16_MAX;
-//                        sq_sum += rms_smp * rms_smp;
-//                    }
-//                    double rms = sqrt(sq_sum / N_FRAMES);
-//
-//                    printf("RMS %f\n", rms);
-//
-//                    const float error_rate = 0.1f;
-//                    const float target = 0.707f;
-//                    if ((rms < (target + error_rate)) && (rms > (target - error_rate))) {
-//
-//                    }
+                    static uint16_t rms_cnt = 0;
+                    const uint16_t rms_cnt_max = 100;
+                    static double rms_sum = 0;
+                    double rms = rms_calculate(rms_buf, RMS_BUF_LEN);
+
+                    rms_sum+=rms;
+                    ++rms_cnt;
+                    if (rms_cnt >= rms_cnt_max) {
+                        double avg_rms = rms_sum / rms_cnt;
+                        rms_cnt = 0;
+                        rms_sum = 0;
+                        printf("\n RMS %f\n\n", avg_rms);
+
+                        const float target = 0.4f;
+                        if (rms > target) {
+                            xTaskNotify(main_task_handle, ULONG_MAX, eSetValueWithOverwrite);
+                        } else {
+                            xTaskNotify(main_task_handle, 0, eSetValueWithOverwrite);
+                        }
+                    }
 
                 }
 
@@ -338,31 +410,24 @@ void wav_task(void *args) {
 
             }while(1) ;
 
-            i2s_zero_dma_buffer(I2S_NUM_0);
-            for (int i = 0; i < N_DESC; i++) {
-                for (int j = 0; j < N_FRAMES; j++) {
-                    samples[i][j] = 0;
-                }
-            }
-        } else {
-
-            printf("notif %d\n", notif);
+            clear_i2s_buffers();
         }
-        
+
         portYIELD();
     }
 }
 
 void file_write_task(void *args) {
     uint32_t notif = 0;
-
+    size_t bytes_n = 0;
     while (1) {
-        xTaskNotifyWait(0, ULONG_MAX, &notif, portMAX_DELAY);
+        if (xTaskNotifyWait(0, ULONG_MAX, &notif, portMAX_DELAY) == pdPASS) {
+            uint8_t idx = notif & 0xF;
+            uint32_t  ret = wav_write_n_bytes(&samples[idx][0], (N_FRAMES) * sizeof(uint16_t));
+            if (ret == 0 ) printf("file wr fail\n");
+            portYIELD();
+        }
 
-        uint8_t idx = notif & 0xF;
-
-        wav_write_n_bytes(&samples[idx][0], (N_FRAMES) * sizeof(uint16_t));
-        portYIELD();
     }
 }
 
@@ -445,17 +510,10 @@ float codec_set_hp_vol (uint8_t percent) {
     }// 0 = mute
 
     vol &= vol_max;
-//    R2_LOUT1_VOLUME_t lout1Volume = {
-//            .OUT1VU = 1, // write 1 to update headphone vol
-//            .LO1ZC = 1, // update on zero cross
-//            .LOUT1VOL = vol //127 max=+6db, 0110000=-73db, 0 = mute, 1db steps
-//    };
-//    reg = *(uint16_t *) &lout1Volume;
     reg = (1<<8) | (1<<7) | (vol);
-    wm8960_writeReg(R2_LOUT1_VOLUME_ADR, reg);
+
+    wm8960_writeReg(R3_ROUT1_VOLUME_ADR, reg);
     vTaskDelay(10);
-//    wm8960_writeReg(R3_ROUT1_VOLUME_ADR, reg);
-//    vTaskDelay(10);
 
     db = roundf(db);
     return db;
@@ -475,10 +533,17 @@ float codec_set_line_out_vol (uint8_t percent) {
     }// 0 = mute
 
     vol &= vol_max;
+//    R2_LOUT1_VOLUME_t lout1Volume = {
+//            .OUT1VU = 1, // write 1 to update headphone vol
+//            .LO1ZC = 1, // update on zero cross
+//            .LOUT1VOL = vol //127 max=+6db, 0110000=-73db, 0 = mute, 1db steps
+//    };
+//    reg = *(uint16_t *) &lout1Volume;
     reg = (1<<8) | (1<<7) | (vol);
-
-    wm8960_writeReg(R3_ROUT1_VOLUME_ADR, reg);
+    wm8960_writeReg(R2_LOUT1_VOLUME_ADR, reg);
     vTaskDelay(10);
+//    wm8960_writeReg(R3_ROUT1_VOLUME_ADR, reg);
+//    vTaskDelay(10);
 
     db = roundf(db);
     return db;
@@ -554,7 +619,7 @@ void codec_enable_mic_boost (bool state) {
     if (state) {
         R33_ADCR_SIGNAL_PATH_t adcrSignalPath = {
                 .RMIC2B =1,
-                .RMICBOOST= 0b10 ,
+                .RMICBOOST= 0b11 ,
                 .RMN1 =1,
                 .RMP2=0,
                 .RMP3=0

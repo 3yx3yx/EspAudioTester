@@ -17,5 +17,6 @@ uint8_t wav_start_record (void);
 void wav_save_record (void);
 void wav_delete_record (void);
 uint8_t wav_curr_file_get_n_channels (void);
+void wav_close_current (void);
 
 #endif //ESP_AUDIOTEST_WAV_H
